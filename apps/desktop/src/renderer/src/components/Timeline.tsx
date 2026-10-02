@@ -40,11 +40,31 @@ export function Timeline({ chat, deciding, onDecide, suggestions, onSuggest }: {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const onScroll = (): void => {
-      stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const atBottom = (): boolean => el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    // Only a deliberate scroll up (wheel, touch, keys) releases the stick; a plain scroll event can
+    // also come from the browser's own scroll anchoring when content is inserted.
+    const onWheel = (e: WheelEvent): void => {
+      if (e.deltaY < 0) stick.current = false;
     };
-    el.addEventListener('scroll', onScroll);
-    return () => el.removeEventListener('scroll', onScroll);
+    const onTouch = (): void => {
+      stick.current = false;
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (['ArrowUp', 'PageUp', 'Home'].includes(e.key)) stick.current = false;
+    };
+    const onScroll = (): void => {
+      if (atBottom()) stick.current = true;
+    };
+    el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('touchmove', onTouch, { passive: true });
+    el.addEventListener('keydown', onKey);
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchmove', onTouch);
+      el.removeEventListener('keydown', onKey);
+      el.removeEventListener('scroll', onScroll);
+    };
   }, []);
   useEffect(() => {
     const el = ref.current;
@@ -79,7 +99,7 @@ export function Timeline({ chat, deciding, onDecide, suggestions, onSuggest }: {
   };
 
   return (
-    <div ref={ref} className="flex-1 overflow-y-auto thread-scroll px-6 py-6">
+    <div ref={ref} tabIndex={-1} className="flex-1 overflow-y-auto thread-scroll px-6 py-6 outline-none [overflow-anchor:none]">
       <div className="max-w-3xl mx-auto flex flex-col gap-3">
         {chat.items.length === 0 && (
           <div className="flex flex-col items-center justify-center text-center gap-3 py-24">

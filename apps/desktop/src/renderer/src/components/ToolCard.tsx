@@ -128,7 +128,7 @@ function SqlCard({ it, sql, busy, onDecide }: { it: ToolItem; sql: string; busy:
       <CardHead
         icon={icon}
         title={verb || 'SQL'}
-        meta={summarizeSql(sql)}
+        meta={summarizeSql(sql).replace(new RegExp(`^${verb}\\s+`, 'i'), '')}
         right={
           <span className="flex items-center gap-2">
             {server && <Tag tone={write ? 'warn' : 'default'}>{server}</Tag>}
@@ -228,9 +228,9 @@ function GenericCard({ it, busy, onDecide }: { it: ToolItem; busy: boolean; onDe
 
 export function ToolCard({ it, busy, onDecide }: { it: ToolItem; busy: boolean; onDecide: (d: 'approve' | 'reject', feedback?: string) => void }) {
   const { server } = splitToolName(it.name);
-  const sql = typeof it.args.sql === 'string' ? it.args.sql : typeof it.args.query === 'string' && server?.startsWith('postgres') ? it.args.query : null;
-  if (sql !== null) return <SqlCard it={it} sql={sql} busy={busy} onDecide={onDecide} />;
   if (server === 'memory') return <MemoryLine it={it} />;
   if (server === 'schema') return <SchemaCard it={it} />;
+  const sql = typeof it.args.sql === 'string' ? it.args.sql : typeof it.args.query === 'string' && server?.startsWith('postgres') ? it.args.query : null;
+  if (sql !== null) return <SqlCard it={it} sql={sql} busy={busy} onDecide={onDecide} />;
   return <GenericCard it={it} busy={busy} onDecide={onDecide} />;
 }

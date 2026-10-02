@@ -9,27 +9,31 @@
   color-scheme: dark;
 }
 
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-  background: #09090b;
-  color: #f4f4f5;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  -webkit-font-smoothing: antialiased;
-}
+/* Base resets live in Tailwind's `base` layer so utility classes keep precedence over them
+   (unlayered rules would otherwise beat every layered utility, e.g. text-zinc-950 on buttons). */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    background: #09090b;
+    color: #f4f4f5;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
 
-* {
-  box-sizing: border-box;
-}
+  * {
+    box-sizing: border-box;
+  }
 
-button,
-input,
-textarea {
-  font: inherit;
-  color: inherit;
+  button,
+  input,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
 }
 
 .mono {
@@ -210,18 +214,18 @@ textarea {
 }
 
 /* ---------- Data grid ---------- */
-.grid-wrap {
+.datagrid-wrap {
   overflow: auto;
   max-height: 420px;
 }
-.grid {
+.datagrid {
   border-collapse: separate;
   border-spacing: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   min-width: 100%;
 }
-.grid th {
+.datagrid th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -233,7 +237,7 @@ textarea {
   border-bottom: 1px solid #27272a;
   white-space: nowrap;
 }
-.grid td {
+.datagrid td {
   padding: 5px 12px;
   border-bottom: 1px solid #1c1c1f;
   color: #d4d4d8;
@@ -243,20 +247,20 @@ textarea {
   text-overflow: ellipsis;
   vertical-align: top;
 }
-.grid tr:hover td {
+.datagrid tr:hover td {
   background: #121215;
 }
-.grid td.num,
-.grid th.num {
+.datagrid td.num,
+.datagrid th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.grid td.null {
+.datagrid td.null {
   color: #52525b;
   font-style: italic;
 }
-.grid td.idx,
-.grid th.idx {
+.datagrid td.idx,
+.datagrid th.idx {
   color: #52525b;
   text-align: right;
   width: 1%;

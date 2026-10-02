@@ -32,6 +32,19 @@ describe('parseRunEvent', () => {
       sql: 'DELETE FROM x',
       statementTypes: ['DELETE'],
       warnings: ['no WHERE clause'],
+      tables: [],
+      estimate: null,
+    });
+    expect(
+      parseRunEvent('approval_required', { tool_call_id: 't', name: 'n', tables: ['x'], estimate: { kind: 'rows', rows: 3, relation: 'x' } }),
+    ).toMatchObject({ tables: ['x'], estimate: { kind: 'rows', rows: 3, relation: 'x' } });
+    expect(parseRunEvent('usage', { tokens_in: 10, tokens_out: '5', cost_usd: 0.01, calls: 1, model: 'm' })).toEqual({
+      type: 'usage',
+      tokensIn: 10,
+      tokensOut: 5,
+      costUsd: 0.01,
+      calls: 1,
+      model: 'm',
     });
   });
 
@@ -52,12 +65,9 @@ describe('parseRunEvent', () => {
 
 describe('response parsers', () => {
   it('parses health and drops non-string MCP statuses', () => {
-    expect(parseHealth({ status: 'ok', version: '0.1.0', model: 'm', mcp: { a: 'connected', b: 3 } })).toEqual({
-      status: 'ok',
-      version: '0.1.0',
-      model: 'm',
-      mcp: { a: 'connected' },
-    });
+    const h = parseHealth({ status: 'ok', version: '0.1.0', model: 'm', mcp: { a: 'connected', b: 3 }, tools: ['x__y', 1], schema_index: { tables: '17', embeddings: true } });
+    expect(h).toMatchObject({ status: 'ok', version: '0.1.0', model: 'm', mcp: { a: 'connected' }, tools: [], store: 'unknown', backendId: null });
+    expect(h?.schemaIndex).toMatchObject({ tables: 17, embeddings: true, embeddingModel: null });
     expect(parseHealth(null)).toBeNull();
   });
 

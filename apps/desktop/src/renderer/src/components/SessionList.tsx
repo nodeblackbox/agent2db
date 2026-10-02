@@ -6,6 +6,7 @@ import { StatusDot, fmtUsd, fmtWhen } from './primitives';
 export function SessionList({
   sessions,
   activeId,
+  activeTitle,
   activeStatus,
   onSelect,
   onNew,
@@ -13,6 +14,7 @@ export function SessionList({
 }: {
   sessions: SessionSummary[];
   activeId: string | null;
+  activeTitle: string;
   activeStatus: 'running' | 'awaiting_approval' | null;
   onSelect: (id: string) => void;
   onNew: () => void;
@@ -37,10 +39,10 @@ export function SessionList({
         </div>
       )}
       <div className="flex-1 overflow-y-auto thread-scroll p-1.5">
-        {activeId === null && (
+        {(activeId === null || !sessions.some((s) => s.id === activeId)) && (
           <div className="rounded-lg px-2.5 py-2 mb-0.5 flex items-center gap-2 bg-zinc-800/70 text-[12.5px] text-zinc-200">
             <StatusDot status={activeStatus === 'running' ? 'running' : activeStatus === 'awaiting_approval' ? 'waiting' : 'idle'} />
-            New chat
+            <span className="truncate">{activeTitle || 'New chat'}</span>
           </div>
         )}
         {shown.map((s) => {

@@ -60,17 +60,17 @@ export function Composer({
             className="w-full bg-transparent resize-none outline-none text-[13.5px] leading-relaxed text-zinc-100 placeholder-zinc-600 px-4 pt-3.5 pb-2 thread-scroll disabled:opacity-60"
           />
           <div className="flex items-center gap-1 px-2.5 pb-2.5">
-            <span className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11.5px] text-zinc-500" title="Model used for this chat (AGENT2DB_MODEL)">
-              <Sparkles size={12} className="text-indigo-300" />
-              <span className="mono">{model}</span>
+            <span className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11.5px] text-zinc-500 min-w-0" title={`Model used for this chat: ${model} (AGENT2DB_MODEL)`}>
+              <Sparkles size={12} className="text-indigo-300 shrink-0" />
+              <span className="mono truncate max-w-[220px]">{model.split('/').pop()}</span>
             </span>
             <div className="flex-1" />
             {tokens > 0 && (
-              <span className="text-[11px] text-zinc-600 mr-2 mono" title={`${fmtTokens(usage.tokensIn)} in · ${fmtTokens(usage.tokensOut)} out`}>
+              <span className="text-[11px] text-zinc-600 mr-2 mono whitespace-nowrap" title={`${fmtTokens(usage.tokensIn)} in · ${fmtTokens(usage.tokensOut)} out`}>
                 {fmtUsd(usage.costUsd)} · {fmtTokens(tokens)} tok
               </span>
             )}
-            <span className="text-[11px] text-zinc-700 mr-2 hidden sm:inline">Enter to send · Shift+Enter for a new line</span>
+            <span className="text-[11px] text-zinc-700 mr-2 whitespace-nowrap hidden lg:inline">Enter to send · Shift+Enter for a new line</span>
             {running ? (
               <button onClick={onStop} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] bg-rose-500/10 border border-rose-900/50 text-rose-300 hover:bg-rose-500/15">
                 <StopCircle size={13} /> Stop

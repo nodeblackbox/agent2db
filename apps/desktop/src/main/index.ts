@@ -290,7 +290,10 @@ function createWindow(): void {
     sendToRenderer(IPC.statusChanged, status);
     sendWindowState();
   });
-  for (const ev of ['maximize', 'unmaximize', 'focus', 'blur'] as const) mainWindow.on(ev, sendWindowState);
+  mainWindow.on('maximize', sendWindowState);
+  mainWindow.on('unmaximize', sendWindowState);
+  mainWindow.on('focus', sendWindowState);
+  mainWindow.on('blur', sendWindowState);
   mainWindow.webContents.on('console-message', (e) => {
     if (e.level === 'warning' || e.level === 'error') log(`renderer ${e.level}: ${e.message}`);
   });

@@ -4,7 +4,12 @@ import { extractSql, formatCell, parseResultTable, splitToolName } from './resul
 describe('parseResultTable', () => {
   it('builds columns from the union of keys in first-seen order', () => {
     const t = parseResultTable('[{"a":1,"b":2},{"b":3,"c":null}]');
-    expect(t).toEqual({ columns: ['a', 'b', 'c'], rows: [{ a: 1, b: 2 }, { b: 3, c: null }], totalRows: 2 });
+    expect(t).toEqual({ columns: ['a', 'b', 'c'], rows: [{ a: 1, b: 2 }, { b: 3, c: null }], totalRows: 2, numeric: new Set(['a', 'b']) });
+  });
+
+  it('detects numeric columns, including numeric strings from Postgres numerics', () => {
+    const t = parseResultTable('[{"n":"12.50","s":"x","m":null},{"n":3,"s":"7","m":null}]')!;
+    expect([...t.numeric]).toEqual(['n']);
   });
 
   it('caps displayed rows but reports the total', () => {

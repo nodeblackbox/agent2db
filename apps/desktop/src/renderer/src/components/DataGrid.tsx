@@ -13,8 +13,8 @@ export function DataGrid({ table, truncated }: { table: ResultTable; truncated: 
   const shown = rows.length;
   return (
     <div>
-      <div className="grid-wrap thread-scroll">
-        <table className="grid">
+      <div className="datagrid-wrap thread-scroll">
+        <table className="datagrid">
           <thead>
             <tr>
               <th className="idx">#</th>

@@ -17,6 +17,9 @@ Phase 2 (safe writes and memory) is implemented and verified live against the de
   Pending approvals survive a backend restart (LangGraph Postgres checkpointer).
 - Token and cost tracking per run, model fallbacks, history trimming.
 - Least-privilege role setup, sample data seeding and a question benchmark as CLIs.
+- Desktop UI: chat list, icon rail (Schema, Tools & MCP, Memory, Approvals, Settings), side
+  drawer, highlighted SQL cards with result grids and inline approval bars
+  (see [`docs/frontend-electron.md`](docs/frontend-electron.md)).
 
 What is still open is in [`docs/roadmap.md`](docs/roadmap.md) (sandboxed Python snippets, skills,
 knowledge graph, packaging).
