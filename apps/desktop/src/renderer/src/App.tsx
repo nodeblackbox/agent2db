@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ComponentType } from 'react';
-import { Brain, MessageSquare, PanelRight, Plug, Settings as SettingsIcon, ShieldCheck, StopCircle, Table2 } from 'lucide-react';
-import type { BackendStatus, SessionSummary, WindowState } from '../../shared/types';
+import { Brain, Database, FileText, MessageSquare, PanelRight, Plug, Settings as SettingsIcon, ShieldCheck, StopCircle, Table2 } from 'lucide-react';
+import type { BackendStatus, DocumentsOverview, SessionSummary, WindowState } from '../../shared/types';
 import { Composer } from './components/Composer';
+import { DatabasePanel } from './components/DatabasePanel';
+import { DocumentsPanel } from './components/DocumentsPanel';
 import { RightDrawer, type DrawerTab } from './components/Drawer';
 import { ApprovalsPanel, McpPanel, MemoryPanel, SchemaPanel, SettingsPanel } from './components/Panels';
 import { SessionList } from './components/SessionList';
@@ -12,10 +14,12 @@ import { chatReducer, initialChatState, isBusy, replayHistory, totalUsage, type 
 
 const api = window.agent2db;
 
-type RailTab = 'chats' | 'schema' | 'tools' | 'memory' | 'approvals' | 'settings';
+type RailTab = 'chats' | 'database' | 'documents' | 'schema' | 'tools' | 'memory' | 'approvals' | 'settings';
 
 const RAIL: Array<{ id: RailTab; label: string; icon: ComponentType<{ size?: number }> }> = [
   { id: 'chats', label: 'Chats', icon: MessageSquare },
+  { id: 'database', label: 'Database', icon: Database },
+  { id: 'documents', label: 'Documents (RAG)', icon: FileText },
   { id: 'schema', label: 'Schema', icon: Table2 },
   { id: 'tools', label: 'Tools & MCP', icon: Plug },
   { id: 'memory', label: 'Memory', icon: Brain },
@@ -57,8 +61,25 @@ export function App() {
   const [drawerTab, setDrawerTab] = useState<DrawerTab>('schema');
   const [deciding, setDeciding] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [docs, setDocs] = useState<DocumentsOverview | null>(null);
   const chatRef = useRef(chat);
   chatRef.current = chat;
+
+  const loadDocs = useCallback(() => {
+    api
+      .listDocuments()
+      .then(setDocs)
+      .catch(() => undefined);
+  }, []);
+  const toggleRag = useCallback(
+    (enabled: boolean) => {
+      api
+        .setRag(enabled)
+        .then(loadDocs)
+        .catch((e) => dispatch({ type: 'local_error', message: `Could not change RAG setting: ${errorMessage(e)}` }));
+    },
+    [loadDocs],
+  );
 
   const ready = status.state === 'ready';
   const health = status.state === 'ready' ? status.health : null;
@@ -88,8 +109,11 @@ export function App() {
 
   // Session list and panels refresh when the backend becomes ready and when a run finishes.
   useEffect(() => {
-    if (ready) loadSessions();
-  }, [ready, loadSessions]);
+    if (ready) {
+      loadSessions();
+      loadDocs();
+    }
+  }, [ready, loadSessions, loadDocs]);
   const runActive = chat.run !== null;
   useEffect(() => {
     if (!runActive && ready) {
@@ -242,7 +266,16 @@ export function App() {
               <div className="flex-1 flex min-h-0">
                 <div className="flex-1 flex flex-col min-w-0">
                   <Timeline chat={chat} deciding={deciding} onDecide={(d, f) => void decide(d, f)} suggestions={ready ? SUGGESTIONS : []} onSuggest={(t) => void send(t)} />
-                  <Composer disabled={!ready} running={busy} model={health?.model ?? '…'} usage={usage} onSend={(t) => void send(t)} onStop={() => void stop()} />
+                  <Composer
+                    disabled={!ready}
+                    running={busy}
+                    model={health?.model ?? '…'}
+                    usage={usage}
+                    rag={docs ? { enabled: docs.ragEnabled, documents: docs.ready } : null}
+                    onToggleRag={toggleRag}
+                    onSend={(t) => void send(t)}
+                    onStop={() => void stop()}
+                  />
                 </div>
                 {drawerOpen && (
                   <div className="shrink-0 border-l border-zinc-800/80" style={{ width: 380 }}>
@@ -251,8 +284,11 @@ export function App() {
                 )}
               </div>
             </>
+          ) : rail === 'database' ? (
+            <DatabasePanel refreshKey={refreshKey} onAsk={(t) => void send(t)} />
           ) : (
             <div className="flex-1 overflow-y-auto thread-scroll">
+              {rail === 'documents' && <DocumentsPanel onBack={goChat} overview={docs} onOverview={setDocs} />}
               {rail === 'schema' && <SchemaPanel onBack={goChat} refreshKey={refreshKey} />}
               {rail === 'tools' && <McpPanel onBack={goChat} health={health} />}
               {rail === 'memory' && <MemoryPanel onBack={goChat} refreshKey={refreshKey} />}

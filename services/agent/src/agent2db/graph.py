@@ -37,6 +37,8 @@ async def _no_emit(_type: str, _data: dict[str, Any]) -> None:
 # Set by the run manager for the duration of a run; LangGraph copies the context into node tasks.
 current_emit: ContextVar[Emit] = ContextVar("current_emit", default=_no_emit)
 current_model: ContextVar[str | None] = ContextVar("current_model", default=None)
+# Per-run override of the RAG setting (None = use the stored setting).
+current_rag: ContextVar[bool | None] = ContextVar("current_rag", default=None)
 
 
 class AgentState(TypedDict, total=False):
@@ -44,6 +46,7 @@ class AgentState(TypedDict, total=False):
     steps: int
     schema: str
     memory: str
+    documents: str
     decisions: dict[str, dict[str, Any]]
     usage: dict[str, Any]
 
@@ -164,9 +167,27 @@ def build_graph(
     *,
     schema_index: Any | None = None,
     store: Any | None = None,
+    documents: Any | None = None,
 ):
-    """`toolbox` is anything with `.tools`, `.openai_tools()` and `.call()` (Toolbox, McpHub or a fake)."""
+    """`toolbox` is anything with `.tools`, `.openai_tools()` and `.call()` (Toolbox, McpHub or a fake).
+
+    `documents` is a DocumentService; when RAG is on (stored setting, or the run's override) the
+    chunks most relevant to the question are placed in the prompt.
+    """
     system_template = (PROMPTS_DIR / "system.md").read_text(encoding="utf-8")
+
+    async def documents_block(question: str) -> str:
+        if documents is None:
+            return ""
+        override = current_rag.get()
+        try:
+            enabled = override if override is not None else await documents.rag_enabled()
+            if not enabled:
+                return ""
+            text = await documents.context(question, max_chars=settings.rag_max_chars)
+        except Exception as exc:  # noqa: BLE001 - documents are optional context
+            return f"(document search unavailable: {exc})"
+        return text or "(no relevant passages found in the uploaded documents)"
 
     async def retrieve_context(state: AgentState) -> dict[str, Any]:
         emit = current_emit.get()
@@ -201,7 +222,8 @@ def build_graph(
                 memory_text = _render_memory(saved, facts)
             except Exception as exc:  # noqa: BLE001
                 memory_text = f"(memory unavailable: {exc})"
-        return {"schema": schema_text, "memory": memory_text, "steps": 0, "decisions": {}, "usage": Usage().as_dict()}
+        docs_text = await documents_block(question)
+        return {"schema": schema_text, "memory": memory_text, "documents": docs_text, "steps": 0, "decisions": {}, "usage": Usage().as_dict()}
 
     async def agent(state: AgentState) -> dict[str, Any]:
         emit = current_emit.get()
@@ -211,6 +233,11 @@ def build_graph(
             system_template.replace("{schema}", state.get("schema", ""))
             .replace("{memory}", state.get("memory", "None yet."))
             .replace("{max_steps}", str(settings.max_steps))
+        )
+        docs = state.get("documents") or ""
+        system = system.replace(
+            "{documents}",
+            ("## Reference documents (retrieved for this request; cite the document name when you use them)\n" + docs) if docs else "",
         )
         history = trim_history(close_dangling_tool_calls(state.get("messages", [])), settings.max_history_chars)
         messages = [{"role": "system", "content": system}, *history]

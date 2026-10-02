@@ -5,9 +5,14 @@
 import { SseParser } from '../shared/sse';
 import {
   parseApprovals,
+  parseDocumentDetail,
+  parseDocumentHits,
+  parseDocumentsOverview,
+  parseErd,
   parseFacts,
   parseHealth,
   parseHistory,
+  parseQueryResult,
   parseRunEvent,
   parseSavedQueries,
   parseSchemaSearch,
@@ -15,11 +20,20 @@ import {
   parseSchemaTables,
   parseSessionList,
   parseStartRunResponse,
+  parseTableRows,
   type ApprovalRecord,
+  type DocumentDetail,
+  type DocumentHit,
+  type DocumentInfo,
+  type DocumentsOverview,
+  type ErdResult,
   type Fact,
   type HealthResponse,
   type HistoryEvent,
+  type QueryResult,
   type ResumeRunArgs,
+  type RowsQuery,
+  type TableRows,
   type RunDoneStatus,
   type RunEvent,
   type RunEventEnvelope,
@@ -65,7 +79,7 @@ export class BackendClient {
     return { Authorization: `Bearer ${this.token}`, ...extra };
   }
 
-  private async requestJson(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
+  private async requestJson(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
     const res = await fetch(this.baseUrl + path, {
       method,
       headers: this.headers(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
@@ -93,9 +107,10 @@ export class BackendClient {
   // ---------- runs ----------
 
   async startRun(args: StartRunArgs): Promise<StartRunResult> {
-    const body: Record<string, string> = { message: args.message };
+    const body: Record<string, unknown> = { message: args.message };
     if (args.sessionId) body.session_id = args.sessionId;
     if (args.model) body.model = args.model;
+    if (args.rag !== undefined) body.rag = args.rag;
     const r = parseStartRunResponse(await this.requestJson('POST', '/runs', body));
     if (!r) throw new Error('POST /runs: unexpected response shape');
     return r;
@@ -165,6 +180,71 @@ export class BackendClient {
 
   async listApprovals(): Promise<ApprovalRecord[]> {
     return parseApprovals(await this.requestJson('GET', '/approvals?limit=200'));
+  }
+
+  // ---------- documents (RAG) ----------
+
+  async listDocuments(): Promise<DocumentsOverview> {
+    return parseDocumentsOverview(await this.requestJson('GET', '/documents'));
+  }
+
+  async uploadDocument(name: string, data: ArrayBuffer | Uint8Array): Promise<DocumentInfo | null> {
+    const form = new FormData();
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    form.append('file', new Blob([bytes]), name);
+    const res = await fetch(`${this.baseUrl}/documents`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: form,
+      signal: AbortSignal.timeout(LONG_REQUEST_TIMEOUT_MS),
+      redirect: 'error',
+    });
+    const text = await res.text();
+    if (!res.ok) throw new BackendHttpError(`upload failed: HTTP ${res.status} ${text.slice(0, 300)}`.trim(), res.status);
+    const overview = parseDocumentsOverview({ documents: [JSON.parse(text)] });
+    return overview.documents[0] ?? null;
+  }
+
+  async documentDetail(id: number): Promise<DocumentDetail | null> {
+    try {
+      return parseDocumentDetail(await this.requestJson('GET', `/documents/${id}`));
+    } catch (e) {
+      if (e instanceof BackendHttpError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  async deleteDocument(id: number): Promise<{ ok: boolean }> {
+    return okOf(await this.requestJson('DELETE', `/documents/${id}`));
+  }
+
+  async searchDocuments(query: string): Promise<DocumentHit[]> {
+    return parseDocumentHits(await this.requestJson('GET', `/documents/search?q=${encodeURIComponent(query)}&limit=8`));
+  }
+
+  async setRag(enabled: boolean): Promise<{ enabled: boolean }> {
+    const r = await this.requestJson('PUT', '/settings/rag', { enabled });
+    return { enabled: typeof r === 'object' && r !== null && (r as { enabled?: unknown }).enabled === true };
+  }
+
+  // ---------- database viewer ----------
+
+  async dbRows(q: RowsQuery): Promise<TableRows | null> {
+    const params = new URLSearchParams();
+    params.set('limit', String(q.limit ?? 50));
+    params.set('offset', String(q.offset ?? 0));
+    if (q.orderBy) params.set('order_by', q.orderBy);
+    if (q.desc) params.set('desc', 'true');
+    if (q.where) params.set('where', q.where);
+    return parseTableRows(await this.requestJson('GET', `/db/tables/${encodeURIComponent(q.table)}/rows?${params.toString()}`));
+  }
+
+  async dbQuery(sql: string): Promise<QueryResult> {
+    return parseQueryResult(await this.requestJson('POST', '/db/query', { sql, max_rows: 500 }, LONG_REQUEST_TIMEOUT_MS));
+  }
+
+  async dbErd(): Promise<ErdResult> {
+    return parseErd(await this.requestJson('GET', '/db/erd', undefined, LONG_REQUEST_TIMEOUT_MS));
   }
 
   // ---------- events ----------

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Send, Sparkles, StopCircle } from 'lucide-react';
+import { FileText, Send, Sparkles, StopCircle } from 'lucide-react';
 import type { UsageTotals } from '../state';
 import { fmtTokens, fmtUsd } from './primitives';
 
@@ -8,6 +8,8 @@ export function Composer({
   running,
   model,
   usage,
+  rag,
+  onToggleRag,
   onSend,
   onStop,
 }: {
@@ -15,6 +17,9 @@ export function Composer({
   running: boolean;
   model: string;
   usage: UsageTotals;
+  /** null until the backend reports the documents overview. */
+  rag: { enabled: boolean; documents: number } | null;
+  onToggleRag: (enabled: boolean) => void;
   onSend: (text: string) => void;
   onStop: () => void;
 }) {
@@ -64,6 +69,23 @@ export function Composer({
               <Sparkles size={12} className="text-indigo-300 shrink-0" />
               <span className="mono truncate max-w-[220px]">{model.split('/').pop()}</span>
             </span>
+            {rag && (
+              <button
+                onClick={() => onToggleRag(!rag.enabled)}
+                title={
+                  rag.enabled
+                    ? `RAG on: passages from your ${rag.documents} ready document${rag.documents === 1 ? '' : 's'} are added to each request. Click to turn off.`
+                    : rag.documents > 0
+                      ? `RAG off: ${rag.documents} document${rag.documents === 1 ? '' : 's'} available. Click to use them in answers.`
+                      : 'No documents uploaded yet (Documents panel).'
+                }
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11.5px] transition-colors ${rag.enabled ? 'bg-indigo-500/15 text-indigo-200' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60'}`}
+              >
+                <FileText size={12} />
+                RAG {rag.enabled ? 'on' : 'off'}
+                {rag.documents > 0 && <span className="text-[10.5px] opacity-70">· {rag.documents}</span>}
+              </button>
+            )}
             <div className="flex-1" />
             {tokens > 0 && (
               <span className="text-[11px] text-zinc-600 mr-2 mono whitespace-nowrap" title={`${fmtTokens(usage.tokensIn)} in · ${fmtTokens(usage.tokensOut)} out`}>

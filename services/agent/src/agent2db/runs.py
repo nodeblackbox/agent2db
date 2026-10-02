@@ -15,7 +15,7 @@ from typing import Any
 
 from langgraph.types import Command
 
-from agent2db.graph import current_emit, current_model
+from agent2db.graph import current_emit, current_model, current_rag
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ class Run:
     usage: dict[str, Any] = field(default_factory=dict)
     steps: int = 0
     store: Any | None = None
+    rag: bool | None = None
 
     async def emit(self, event_type: str, data: dict[str, Any]) -> None:
         async with self.changed:
@@ -94,14 +95,14 @@ class RunManager:
         run = self.runs.get(self._session_runs.get(session_id, ""))
         return run if run and run.status in ("running", "awaiting_approval") else None
 
-    def start(self, message: str, session_id: str | None, model: str | None) -> Run:
+    def start(self, message: str, session_id: str | None, model: str | None, rag: bool | None = None) -> Run:
         session_id = session_id or uuid.uuid4().hex
         active = self.active_for_session(session_id)
         if active and active.status == "running":
             raise RuntimeError("This session already has a run in progress.")
         if active and active.status == "awaiting_approval":
             raise RuntimeError("This session is waiting for an approval decision; approve or reject it first.")
-        run = Run(id=uuid.uuid4().hex, session_id=session_id, model=model, store=self.store)
+        run = Run(id=uuid.uuid4().hex, session_id=session_id, model=model, store=self.store, rag=rag)
         self.runs[run.id] = run
         self._session_runs[session_id] = run.id
         graph_input = {"messages": [{"role": "user", "content": message}]}
@@ -166,6 +167,7 @@ class RunManager:
     async def _drive(self, run: Run, graph_input: Any, *, first_message: str | None = None, decision: Any = None) -> None:
         current_emit.set(run.emit)
         current_model.set(run.model)
+        current_rag.set(run.rag)
         config = {"configurable": {"thread_id": run.session_id}, "recursion_limit": 200}
         try:
             if self.store is not None:

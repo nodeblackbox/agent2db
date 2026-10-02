@@ -95,3 +95,16 @@ All routes need `Authorization: Bearer <token>`.
 | GET | `/approvals` | audit log of every write approval and its outcome |
 | GET/POST/DELETE | `/saved-queries`, `/facts` | memory management (`?q=` searches) |
 | GET/POST | `/schema`, `/schema/reindex`, `/schema/search?q=`, `/schema/tables/{name}` | schema index |
+| GET/POST/DELETE | `/documents`, `/documents/{id}`, `/documents/search?q=` | upload (multipart `file`, ≤ 50 MB), list with ingestion status, chunks, hybrid search |
+| GET/PUT | `/settings/rag` | `{enabled}`: add the best document passages to every request |
+| GET | `/db/tables/{schema.table}/rows?limit&offset&order_by&desc&where` | paged rows for the viewer (read-only transaction) |
+| POST | `/db/query` | `{sql, max_rows}`; SELECT/EXPLAIN/SHOW only, 30 s timeout, 500-row cap |
+| GET | `/db/erd?tables=a,b` | Mermaid `erDiagram` built from the schema index |
+
+Documents (`documents.py`): PDF (pypdf), DOCX (python-docx), Markdown, HTML and text are extracted,
+split into heading-aware chunks (1200 chars, 150 overlap) and stored in `agent2db.chunks` with a
+full-text index. With an embedding model the chunks are embedded; vectors live in Postgres
+(`real[]`) or in Qdrant when `QDRANT_URL` is set (`docker run -p 6333:6333 qdrant/qdrant`).
+Search fuses full-text rank and cosine similarity. The agent always has `documents__search` and
+`documents__list`; with RAG on, `retrieve_context` also injects the top passages (`AGENT2DB_RAG_MAX_CHARS`).
+A run can override the setting with `{"rag": true|false}` in `POST /runs`.

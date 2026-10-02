@@ -162,6 +162,39 @@ def schema_tools(index: SchemaIndex) -> list[InternalTool]:
     ]
 
 
+def document_tools(service: Any) -> list[InternalTool]:
+    async def search(args: dict[str, Any]) -> str:
+        hits = await service.search(str(args["query"]), limit=int(args.get("limit") or 5))
+        return _dumps(
+            [
+                {"document": h["document"], "heading": h.get("heading"), "page": h.get("page"), "score": h.get("score"), "content": h["content"]}
+                for h in hits
+            ]
+        )
+
+    async def list_docs(args: dict[str, Any]) -> str:
+        docs = await service.list_documents()
+        return _dumps([{"id": d["id"], "name": d["name"], "kind": d["kind"], "status": d["status"], "chunks": d["chunk_count"], "pages": d.get("pages")} for d in docs])
+
+    return [
+        InternalTool(
+            "documents",
+            "search",
+            "Search the user's uploaded documents (policies, specs, notes) for passages about a topic. "
+            "Returns the best matching chunks with document name, heading and page.",
+            _schema({"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}, ["query"]),
+            search,
+        ),
+        InternalTool(
+            "documents",
+            "list",
+            "List the uploaded documents available for search.",
+            _schema({}, []),
+            list_docs,
+        ),
+    ]
+
+
 class Toolbox:
     """MCP tools plus internal tools behind one interface."""
 

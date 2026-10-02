@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain, session, shell, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { existsSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BackendClient, RunStreams } from './api';
@@ -12,11 +13,16 @@ import {
   validateNumericId,
   validateQuery,
   validateResumeRunArgs,
+  validateRowsQuery,
   validateRunId,
   validateSessionId,
+  validateSql,
   validateStartRunArgs,
   validateTableName,
+  validateUpload,
+  MAX_UPLOAD_BYTES,
   type BackendStatus,
+  type DocumentInfo,
   type RunEventEnvelope,
   type WindowState,
 } from '../shared/types';
@@ -192,6 +198,46 @@ function registerIpc(): void {
   handle(IPC.listSavedQueries, async () => requireClient().listSavedQueries());
   handle(IPC.deleteSavedQuery, async (raw) => requireClient().deleteSavedQuery(validateNumericId(raw)));
   handle(IPC.listApprovals, async () => requireClient().listApprovals());
+
+  // Documents: the file picker lives here so the renderer never sees file paths.
+  handle(IPC.listDocuments, async () => requireClient().listDocuments());
+  handle(IPC.uploadDocumentsDialog, async () => {
+    const client = requireClient();
+    if (!mainWindow) return [];
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: 'Add documents',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Documents', extensions: ['pdf', 'docx', 'md', 'markdown', 'txt', 'html', 'htm', 'csv', 'json', 'yaml', 'yml', 'rst'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    const out: DocumentInfo[] = [];
+    for (const file of picked.filePaths) {
+      const info = await stat(file);
+      if (info.size === 0 || info.size > MAX_UPLOAD_BYTES) {
+        log(`skipped ${path.basename(file)}: empty or larger than 50 MB`);
+        continue;
+      }
+      const data = await readFile(file);
+      const row = await client.uploadDocument(path.basename(file), data);
+      if (row) out.push(row);
+    }
+    return out;
+  });
+  handle(IPC.uploadDocument, async (raw) => {
+    const payload = validateUpload(raw);
+    return requireClient().uploadDocument(payload.name, payload.data);
+  });
+  handle(IPC.documentDetail, async (raw) => requireClient().documentDetail(validateNumericId(raw)));
+  handle(IPC.deleteDocument, async (raw) => requireClient().deleteDocument(validateNumericId(raw)));
+  handle(IPC.searchDocuments, async (raw) => requireClient().searchDocuments(validateQuery(raw)));
+  handle(IPC.setRag, async (raw) => requireClient().setRag(raw === true));
+
+  // Database viewer (read-only on the backend).
+  handle(IPC.dbRows, async (raw) => requireClient().dbRows(validateRowsQuery(raw)));
+  handle(IPC.dbQuery, async (raw) => requireClient().dbQuery(validateSql(raw)));
+  handle(IPC.dbErd, async () => requireClient().dbErd());
 
   // Window controls for the frameless window.
   handle(IPC.windowMinimize, () => mainWindow?.minimize());

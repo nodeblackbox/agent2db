@@ -161,6 +161,97 @@ export interface ApprovalRecord {
   decidedAt: string | null;
 }
 
+// ---------- documents (RAG) and database viewer ----------
+
+export interface DocumentInfo {
+  id: number;
+  name: string;
+  kind: string;
+  sizeBytes: number;
+  status: 'pending' | 'processing' | 'ready' | 'failed';
+  error: string | null;
+  chunkCount: number;
+  charCount: number;
+  pages: number | null;
+  tags: string[];
+  embeddingModel: string | null;
+  createdAt: string;
+}
+
+export interface DocumentsOverview {
+  documents: DocumentInfo[];
+  ready: number;
+  chunks: number;
+  vectorIndex: string;
+  embeddingModel: string | null;
+  ragEnabled: boolean;
+}
+
+export interface ChunkInfo {
+  id: number;
+  idx: number;
+  heading: string | null;
+  page: number | null;
+  content: string;
+  charCount: number;
+  embedded: boolean;
+}
+
+export interface DocumentDetail extends DocumentInfo {
+  chunks: ChunkInfo[];
+}
+
+export interface DocumentHit {
+  id: number;
+  document: string;
+  documentId: number;
+  heading: string | null;
+  page: number | null;
+  content: string;
+  score: number;
+  similarity: number;
+}
+
+export interface TableRows {
+  table: string;
+  columns: string[];
+  rows: unknown[][];
+  limit: number;
+  offset: number;
+  total: number | null;
+  estimate: number;
+}
+
+export interface QueryResult {
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+  truncated: boolean;
+  ms: number;
+  error: string | null;
+  statementTypes: string[];
+}
+
+export interface ErdResult {
+  mermaid: string;
+  tables: number;
+}
+
+export interface RowsQuery {
+  table: string;
+  limit?: number;
+  offset?: number;
+  orderBy?: string;
+  desc?: boolean;
+  where?: string;
+}
+
+/** Bytes handed from the renderer (drag and drop) to main for upload. */
+export interface UploadPayload {
+  name: string;
+  data: ArrayBuffer;
+}
+
 // ---------- small guards ----------
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -407,6 +498,95 @@ export function parseApprovals(v: unknown): ApprovalRecord[] {
   return out;
 }
 
+const DOC_STATUSES = ['pending', 'processing', 'ready', 'failed'] as const;
+
+function parseDocument(row: unknown): DocumentInfo | null {
+  if (!isObj(row) || typeof row.id !== 'number' || !isStr(row.name)) return null;
+  const status = isStr(row.status) && (DOC_STATUSES as readonly string[]).includes(row.status) ? (row.status as DocumentInfo['status']) : 'pending';
+  return {
+    id: row.id,
+    name: row.name,
+    kind: isStr(row.kind) ? row.kind : 'text',
+    sizeBytes: num(row.size_bytes),
+    status,
+    error: strOrNull(row.error),
+    chunkCount: num(row.chunk_count),
+    charCount: num(row.char_count),
+    pages: numOrNull(row.pages),
+    tags: strList(row.tags),
+    embeddingModel: strOrNull(row.embedding_model),
+    createdAt: isStr(row.created_at) ? row.created_at : '',
+  };
+}
+
+export function parseDocumentsOverview(v: unknown): DocumentsOverview {
+  const o = isObj(v) ? v : {};
+  const documents = Array.isArray(o.documents) ? o.documents.map(parseDocument).filter((d): d is DocumentInfo => d !== null) : [];
+  return {
+    documents,
+    ready: num(o.ready),
+    chunks: num(o.chunks),
+    vectorIndex: isStr(o.vector_index) ? o.vector_index : 'postgres',
+    embeddingModel: strOrNull(o.embedding_model),
+    ragEnabled: o.rag_enabled === true,
+  };
+}
+
+export function parseDocumentDetail(v: unknown): DocumentDetail | null {
+  const doc = parseDocument(v);
+  if (!doc || !isObj(v)) return null;
+  const chunks: ChunkInfo[] = [];
+  for (const c of Array.isArray(v.chunks) ? v.chunks : []) {
+    if (!isObj(c) || typeof c.id !== 'number' || !isStr(c.content)) continue;
+    chunks.push({ id: c.id, idx: num(c.idx), heading: strOrNull(c.heading), page: numOrNull(c.page), content: c.content, charCount: num(c.char_count), embedded: c.embedded === true });
+  }
+  return { ...doc, chunks };
+}
+
+export function parseDocumentHits(v: unknown): DocumentHit[] {
+  if (!Array.isArray(v)) return [];
+  const out: DocumentHit[] = [];
+  for (const h of v) {
+    if (!isObj(h) || typeof h.id !== 'number' || !isStr(h.content)) continue;
+    out.push({
+      id: h.id,
+      document: isStr(h.document) ? h.document : '',
+      documentId: num(h.document_id),
+      heading: strOrNull(h.heading),
+      page: numOrNull(h.page),
+      content: h.content,
+      score: num(h.score),
+      similarity: num(h.similarity),
+    });
+  }
+  return out;
+}
+
+const cellRows = (v: unknown): unknown[][] => (Array.isArray(v) ? v.filter(Array.isArray).map((r) => [...(r as unknown[])]) : []);
+
+export function parseTableRows(v: unknown): TableRows | null {
+  if (!isObj(v) || !isStr(v.table) || !isStrArray(v.columns)) return null;
+  return { table: v.table, columns: v.columns, rows: cellRows(v.rows), limit: num(v.limit, 50), offset: num(v.offset), total: numOrNull(v.total), estimate: num(v.estimate) };
+}
+
+export function parseQueryResult(v: unknown): QueryResult {
+  const o = isObj(v) ? v : {};
+  return {
+    columns: strList(o.columns),
+    rows: cellRows(o.rows),
+    rowCount: num(o.row_count),
+    truncated: o.truncated === true,
+    ms: num(o.ms),
+    error: strOrNull(o.error),
+    statementTypes: strList(o.statement_types),
+  };
+}
+
+export function parseErd(v: unknown): ErdResult {
+  const o = isObj(v) ? v : {};
+  return { mermaid: isStr(o.mermaid) ? o.mermaid : 'erDiagram\n', tables: num(o.tables) };
+}
+
 // ---------- IPC argument validation (renderer is untrusted) ----------
 
 export const MAX_MESSAGE_LENGTH = 100_000;
@@ -421,6 +601,8 @@ export interface StartRunArgs {
   message: string;
   sessionId?: string;
   model?: string;
+  /** Override the stored RAG setting for this run. */
+  rag?: boolean;
 }
 
 export interface ResumeRunArgs {
@@ -442,7 +624,50 @@ export function validateStartRunArgs(v: unknown): StartRunArgs {
   const out: StartRunArgs = { message };
   if (isStr(sessionId)) out.sessionId = sessionId;
   if (isStr(model)) out.model = model;
+  if (typeof v.rag === 'boolean') out.rag = v.rag;
   return out;
+}
+
+export function validateRowsQuery(v: unknown): RowsQuery {
+  if (!isObj(v)) throw new ValidationError('rows: expected an object');
+  const { table, limit, offset, orderBy, desc, where } = v;
+  if (!isStr(table) || !/^[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*$/.test(table)) throw new ValidationError('rows: invalid table');
+  const out: RowsQuery = { table };
+  if (limit !== undefined) {
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 500) throw new ValidationError('rows: invalid limit');
+    out.limit = limit;
+  }
+  if (offset !== undefined) {
+    if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) throw new ValidationError('rows: invalid offset');
+    out.offset = offset;
+  }
+  if (orderBy !== undefined && orderBy !== null) {
+    if (!isStr(orderBy) || !/^[A-Za-z_][A-Za-z0-9_$]*$/.test(orderBy)) throw new ValidationError('rows: invalid orderBy');
+    out.orderBy = orderBy;
+  }
+  if (desc !== undefined) out.desc = desc === true;
+  if (where !== undefined && where !== null) {
+    if (!isStr(where) || where.length > 2000) throw new ValidationError('rows: invalid where');
+    if (where.trim()) out.where = where;
+  }
+  return out;
+}
+
+export function validateSql(v: unknown): string {
+  if (!isStr(v) || v.trim().length === 0 || v.length > 50_000) throw new ValidationError('invalid sql');
+  return v;
+}
+
+export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+export function validateUpload(v: unknown): UploadPayload {
+  if (!isObj(v)) throw new ValidationError('upload: expected an object');
+  const { name, data } = v;
+  if (!isStr(name) || name.trim().length === 0 || name.length > 255 || /[\\/]/.test(name)) throw new ValidationError('upload: invalid file name');
+  if (!(data instanceof ArrayBuffer) && !ArrayBuffer.isView(data)) throw new ValidationError('upload: data must be binary');
+  const buffer = data instanceof ArrayBuffer ? data : (data as ArrayBufferView).buffer.slice((data as ArrayBufferView).byteOffset, (data as ArrayBufferView).byteOffset + (data as ArrayBufferView).byteLength);
+  if (buffer.byteLength === 0 || buffer.byteLength > MAX_UPLOAD_BYTES) throw new ValidationError('upload: file is empty or larger than 50 MB');
+  return { name: name.trim(), data: buffer as ArrayBuffer };
 }
 
 export function validateResumeRunArgs(v: unknown): ResumeRunArgs {
@@ -505,6 +730,16 @@ export const IPC = {
   listSavedQueries: 'memory:saved-queries',
   deleteSavedQuery: 'memory:delete-saved-query',
   listApprovals: 'approvals:list',
+  listDocuments: 'documents:list',
+  uploadDocumentsDialog: 'documents:upload-dialog',
+  uploadDocument: 'documents:upload',
+  documentDetail: 'documents:detail',
+  deleteDocument: 'documents:delete',
+  searchDocuments: 'documents:search',
+  setRag: 'documents:set-rag',
+  dbRows: 'db:rows',
+  dbQuery: 'db:query',
+  dbErd: 'db:erd',
   windowMinimize: 'window:minimize',
   windowMaximize: 'window:maximize',
   windowClose: 'window:close',
@@ -537,6 +772,17 @@ export interface Agent2DbApi {
   listSavedQueries(): Promise<SavedQuery[]>;
   deleteSavedQuery(id: number): Promise<{ ok: boolean }>;
   listApprovals(): Promise<ApprovalRecord[]>;
+  listDocuments(): Promise<DocumentsOverview>;
+  /** Opens the OS file picker in main and uploads the chosen files; resolves with the new rows. */
+  uploadDocumentsDialog(): Promise<DocumentInfo[]>;
+  uploadDocument(payload: UploadPayload): Promise<DocumentInfo | null>;
+  documentDetail(id: number): Promise<DocumentDetail | null>;
+  deleteDocument(id: number): Promise<{ ok: boolean }>;
+  searchDocuments(query: string): Promise<DocumentHit[]>;
+  setRag(enabled: boolean): Promise<{ enabled: boolean }>;
+  dbRows(query: RowsQuery): Promise<TableRows | null>;
+  dbQuery(sql: string): Promise<QueryResult>;
+  dbErd(): Promise<ErdResult>;
   windowMinimize(): Promise<void>;
   windowMaximize(): Promise<void>;
   windowClose(): Promise<void>;

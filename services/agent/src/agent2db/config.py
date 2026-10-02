@@ -66,6 +66,10 @@ class Settings:
     schema_max_chars: int = 14_000
     tool_timeout: float = 120.0
     log_dir: Path | None = None
+    # Optional Qdrant for document vectors; without it chunk embeddings live in Postgres.
+    qdrant_url: str | None = None
+    qdrant_api_key: str | None = None
+    rag_max_chars: int = 6000
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -101,4 +105,7 @@ class Settings:
             schema_max_chars=_int_env("AGENT2DB_SCHEMA_MAX_CHARS", 14_000),
             tool_timeout=float(_int_env("AGENT2DB_TOOL_TIMEOUT", 120)),
             log_dir=Path(os.environ.get("AGENT2DB_LOG_DIR") or SERVICE_DIR / "logs"),
+            qdrant_url=os.environ.get("QDRANT_URL", "").strip() or None,
+            qdrant_api_key=os.environ.get("QDRANT_API_KEY", "").strip() or None,
+            rag_max_chars=_int_env("AGENT2DB_RAG_MAX_CHARS", 6000),
         )

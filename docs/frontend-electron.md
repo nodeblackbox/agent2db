@@ -62,7 +62,15 @@ palette, rounded cards, 13px UI type, mono for identifiers.
 7. **Tools & MCP** (done) — servers with status and the tools each exposes.
 8. **Settings** (done, read-only) — backend, model, fallbacks, store, checkpointer, schema index;
    restart backend. Editing `.env` from the UI is not implemented.
-9. **Connections**, **Skills**, charts — not started.
+9. **Database** (done) — table list grouped by schema; Data tab with paging, column sorting and a
+   WHERE filter; Structure tab (columns, keys, DDL); Query tab (read-only SQL, Ctrl+Enter, 500-row
+   cap); Diagram tab (Mermaid ER diagram rendered in-app with zoom/pan, copy Mermaid source or SVG).
+   "Ask the agent about this table" jumps to chat with a prompt.
+10. **Documents (RAG)** (done) — add files via the OS picker or drag and drop, ingestion status
+    with polling, chunk preview per document, a search box that shows what the agent would
+    retrieve, delete, and the RAG switch (also on the composer). Uploads go renderer → main →
+    backend; the renderer never sees file paths.
+11. **Connections**, **Skills**, charts — not started.
 
 ## Browser preview
 

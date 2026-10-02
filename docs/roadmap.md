@@ -45,6 +45,16 @@ one tool call per question with `anthropic/claude-sonnet-5-5`.)
 **Done when:** an UPDATE request pauses for approval, shows the statement and estimate, and only
 runs after approval; the read role provably cannot write. (Met: verified live on 2026-10-02.)
 
+## Phase 2.5 — Documents (RAG) and database viewer (done 2026-10-02)
+
+- [x] Document ingestion: PDF, DOCX, Markdown, HTML, text → heading-aware chunks → full-text index
+      → embeddings (Postgres `real[]`, or Qdrant via `QDRANT_URL`). Hybrid search, RAG on/off switch,
+      per-run override, `documents__search` / `documents__list` tools.
+- [x] Desktop Documents panel: picker and drag-and-drop upload, status polling, chunk preview, search preview.
+- [x] Database viewer: paged data with sort and filter, structure, read-only query editor, Mermaid ER
+      diagram with zoom/pan.
+- [ ] OCR for scanned PDFs; Google Docs import (export as .docx first for now).
+
 ## Phase 3 — Snippets, skills, knowledge
 
 - [ ] Docker sandbox and Python snippet runner; snippet library with search.

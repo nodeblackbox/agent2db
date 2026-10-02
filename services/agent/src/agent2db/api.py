@@ -10,18 +10,22 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from agent2db import __version__
+from agent2db import dbviewer
 from agent2db.config import Settings
+from agent2db.documents import DocumentService, json_safe
 from agent2db.graph import build_graph
 from agent2db.mcp_hub import McpHub, load_config
 from agent2db.runs import RunManager
 from agent2db.schema_index import SchemaIndex
 from agent2db.store import AppStore, json_ready
-from agent2db.tools import Toolbox, memory_tools, schema_tools
+from agent2db.tools import Toolbox, document_tools, memory_tools, schema_tools
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +38,17 @@ class StartRunRequest(BaseModel):
     message: str = Field(min_length=1, max_length=50_000)
     session_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
     model: str | None = Field(default=None, max_length=200)
+    # None = use the stored RAG setting; True/False overrides it for this run.
+    rag: bool | None = None
+
+
+class RagSettingRequest(BaseModel):
+    enabled: bool
+
+
+class QueryRequest(BaseModel):
+    sql: str = Field(min_length=1, max_length=50_000)
+    max_rows: int = Field(default=200, ge=1, le=500)
 
 
 class ResumeRequest(BaseModel):
@@ -86,8 +101,11 @@ def create_app(settings: Settings, token: str, on_ready: Any = None) -> FastAPI:
         index = SchemaIndex(store, settings.read_dsn, embedding_model=settings.embedding_model)
         await index.load()
         internal = schema_tools(index)
+        documents: DocumentService | None = None
         if store is not None:
             internal += memory_tools(store)
+            documents = DocumentService(store, settings.embedding_model, qdrant_url=settings.qdrant_url, qdrant_api_key=settings.qdrant_api_key)
+            internal += document_tools(documents)
         toolbox = Toolbox(hub, internal)
 
         app.state.store = store
@@ -95,7 +113,8 @@ def create_app(settings: Settings, token: str, on_ready: Any = None) -> FastAPI:
         app.state.index = index
         app.state.toolbox = toolbox
         app.state.checkpointer = checkpointer
-        graph = build_graph(settings, toolbox, checkpointer, schema_index=index, store=store)
+        app.state.documents = documents
+        graph = build_graph(settings, toolbox, checkpointer, schema_index=index, store=store, documents=documents)
         backend_id = uuid.uuid4().hex
         app.state.backend_id = backend_id
         app.state.runs = RunManager(graph, store, settings.model, backend_id=backend_id)
@@ -162,6 +181,7 @@ def create_app(settings: Settings, token: str, on_ready: Any = None) -> FastAPI:
             "store": "connected" if store is not None else "unavailable",
             "checkpointer": "postgres" if request.app.state.checkpointer is not None else "memory",
             "schema_index": index.status,
+            "documents": json_safe(await request.app.state.documents.stats()) if request.app.state.documents is not None else None,
         }
 
     # ---------- runs ----------
@@ -170,7 +190,7 @@ def create_app(settings: Settings, token: str, on_ready: Any = None) -> FastAPI:
     async def start_run(body: StartRunRequest, request: Request) -> dict[str, str]:
         runs: RunManager = request.app.state.runs
         try:
-            run = runs.start(body.message, body.session_id, body.model)
+            run = runs.start(body.message, body.session_id, body.model, rag=body.rag)
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"run_id": run.id, "session_id": run.session_id}
@@ -351,5 +371,96 @@ def create_app(settings: Settings, token: str, on_ready: Any = None) -> FastAPI:
                 "ddl": ddl,
             }
         )
+
+    # ---------- documents (RAG) ----------
+
+    def require_documents(request: Request) -> DocumentService:
+        service = request.app.state.documents
+        if service is None:
+            raise HTTPException(status_code=503, detail="Documents need the app database.")
+        return service
+
+    @app.get("/documents", dependencies=auth)
+    async def list_documents(request: Request) -> dict[str, Any]:
+        service = require_documents(request)
+        return json_safe({"documents": await service.list_documents(), **await service.stats()})
+
+    @app.post("/documents", dependencies=auth)
+    async def upload_document(request: Request, file: UploadFile = File(...), tags: str = Form(default="")) -> dict[str, Any]:
+        service = require_documents(request)
+        data = await file.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="File is larger than 50 MB.")
+        if not data:
+            raise HTTPException(status_code=400, detail="Empty file.")
+        try:
+            row = await service.add_document(file.filename or "upload", data, file.content_type, [t.strip() for t in tags.split(",") if t.strip()])
+        except ValueError as exc:
+            raise HTTPException(status_code=415, detail=str(exc)) from exc
+        return json_safe(row)
+
+    @app.get("/documents/search", dependencies=auth)
+    async def search_documents(request: Request, q: str, limit: int = 6) -> list[dict[str, Any]]:
+        service = require_documents(request)
+        return json_safe(await service.search(q, limit=min(max(limit, 1), 20)))
+
+    @app.get("/documents/{document_id}", dependencies=auth)
+    async def document_detail(document_id: int, request: Request) -> dict[str, Any]:
+        service = require_documents(request)
+        row = await service.get_document(document_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Unknown document.")
+        return json_safe({**row, "chunks": await service.list_chunks(document_id)})
+
+    @app.delete("/documents/{document_id}", dependencies=auth)
+    async def delete_document(document_id: int, request: Request) -> dict[str, bool]:
+        service = require_documents(request)
+        return {"ok": await service.delete_document(document_id)}
+
+    @app.get("/settings/rag", dependencies=auth)
+    async def get_rag(request: Request) -> dict[str, Any]:
+        service = require_documents(request)
+        return {"enabled": await service.rag_enabled()}
+
+    @app.put("/settings/rag", dependencies=auth)
+    async def set_rag(body: RagSettingRequest, request: Request) -> dict[str, Any]:
+        service = require_documents(request)
+        await service.set_rag_enabled(body.enabled)
+        return {"enabled": body.enabled}
+
+    # ---------- database viewer (read-only) ----------
+
+    def require_read_dsn() -> str:
+        if not settings.read_dsn:
+            raise HTTPException(status_code=503, detail="No database connection configured.")
+        return settings.read_dsn
+
+    @app.get("/db/tables/{table}/rows", dependencies=auth)
+    async def db_rows(
+        table: str,
+        limit: int = 50,
+        offset: int = 0,
+        order_by: str | None = None,
+        desc: bool = False,
+        where: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return await dbviewer.table_rows(require_read_dsn(), table, limit=limit, offset=offset, order_by=order_by, descending=desc, where=where)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - database errors become 400s with the message
+            raise HTTPException(status_code=400, detail=str(exc).strip().splitlines()[0]) from exc
+
+    @app.post("/db/query", dependencies=auth)
+    async def db_query(body: QueryRequest) -> dict[str, Any]:
+        return await dbviewer.run_query(require_read_dsn(), body.sql, max_rows=body.max_rows)
+
+    @app.get("/db/erd", dependencies=auth)
+    async def db_erd(request: Request, tables: str | None = None) -> dict[str, Any]:
+        index: SchemaIndex = request.app.state.index
+        if not index.cards:
+            await index.ensure_fresh()
+        selected = [t for t in (tables or "").split(",") if t] or None
+        return {"mermaid": dbviewer.mermaid_erd(index.cards, tables=selected), "tables": len(selected or index.cards)}
 
     return app

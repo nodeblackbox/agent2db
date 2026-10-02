@@ -104,3 +104,25 @@ describe('IPC validators', () => {
     expect(validateRunId('2f6c-11')).toBe('2f6c-11');
   });
 });
+
+describe('documents and viewer parsers', () => {
+  it('parses the documents overview and tolerates bad rows', async () => {
+    const { parseDocumentsOverview, parseTableRows, parseQueryResult, validateRowsQuery, validateUpload } = await import('./types');
+    const o = parseDocumentsOverview({ documents: [{ id: 1, name: 'a.md', kind: 'markdown', size_bytes: 10, status: 'ready', chunk_count: 2 }, { bogus: true }], ready: 1, chunks: 2, vector_index: 'postgres', rag_enabled: true });
+    expect(o.documents).toHaveLength(1);
+    expect(o.documents[0]).toMatchObject({ id: 1, status: 'ready', chunkCount: 2, tags: [] });
+    expect(o.ragEnabled).toBe(true);
+
+    expect(parseTableRows({ table: 'public.t', columns: ['a'], rows: [[1], 'x', [null]], total: '12', estimate: 12 })).toEqual({ table: 'public.t', columns: ['a'], rows: [[1], [null]], limit: 50, offset: 0, total: 12, estimate: 12 });
+    expect(parseQueryResult({ columns: ['n'], rows: [[1]], row_count: 1, ms: 3, statement_types: ['SELECT'] })).toMatchObject({ rowCount: 1, error: null, statementTypes: ['SELECT'] });
+
+    expect(validateRowsQuery({ table: 'public.orders', limit: 25, orderBy: 'id', desc: true, where: "status = 'paid'" })).toEqual({ table: 'public.orders', limit: 25, orderBy: 'id', desc: true, where: "status = 'paid'" });
+    expect(() => validateRowsQuery({ table: 'orders' })).toThrow();
+    expect(() => validateRowsQuery({ table: 'public.orders', orderBy: 'id; drop' })).toThrow();
+    expect(() => validateRowsQuery({ table: 'public.orders', limit: 5000 })).toThrow();
+
+    expect(validateUpload({ name: 'notes.md', data: new Uint8Array([1, 2, 3]) }).data.byteLength).toBe(3);
+    expect(() => validateUpload({ name: '../x.md', data: new ArrayBuffer(3) })).toThrow();
+    expect(() => validateUpload({ name: 'x.md', data: new ArrayBuffer(0) })).toThrow();
+  });
+});

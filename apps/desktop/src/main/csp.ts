@@ -3,10 +3,12 @@
  * directly (all backend traffic goes through main), so connect-src is 'none' in production.
  * Dev relaxes script/style/connect only as far as Vite HMR and React Fast Refresh need.
  */
+// style-src allows inline styles: Mermaid renders the ER diagram as an SVG that carries its own
+// <style> element. Scripts stay strictly 'self'.
 export const PROD_CSP = [
   "default-src 'none'",
   "script-src 'self'",
-  "style-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self'",
   "connect-src 'none'",

@@ -13,6 +13,7 @@ export function installDevBridge(): void {
   const eventListeners = new Set<(e: RunEventEnvelope) => void>();
   const winListeners = new Set<(w: WindowState) => void>();
   let status: BackendStatus = { state: 'starting' };
+  let ragOn = false;
   const sessions: SessionSummary[] = [
     { id: 'demo-1', title: 'Top customers by revenue last month', model: 'anthropic/claude-sonnet-5-5', createdAt: new Date(Date.now() - 3600e3).toISOString(), updatedAt: new Date(Date.now() - 1200e3).toISOString(), runCount: 3, tokensIn: 41000, tokensOut: 1200, costUsd: 0.14 },
     { id: 'demo-2', title: 'Mark accessories inactive', model: 'anthropic/claude-sonnet-5-5', createdAt: new Date(Date.now() - 86400e3).toISOString(), updatedAt: new Date(Date.now() - 80000e3).toISOString(), runCount: 1, tokensIn: 19000, tokensOut: 300, costUsd: 0.06 },
@@ -156,6 +157,32 @@ export function installDevBridge(): void {
     listSavedQueries: async () => [{ id: 1, name: 'top_customers_last_month', description: 'Top 10 customers by paid+shipped revenue, previous calendar month', sql: 'select 1', tables: ['sandbox_data.orders'], tags: [], useCount: 3, updatedAt: new Date().toISOString() }],
     deleteSavedQuery: async () => ({ ok: true }),
     listApprovals: async () => [{ id: 1, runId: 'r', toolName: 'postgres-write__execute_sql', sql: "UPDATE sandbox_data.products SET active = false WHERE category = 'accessories'", statementTypes: ['UPDATE'], warnings: [], estimate: null, decision: 'approve', feedback: null, requestedAt: new Date().toISOString(), decidedAt: new Date().toISOString() }],
+    listDocuments: async () => ({
+      documents: [
+        { id: 1, name: 'refund-policy.md', kind: 'markdown', sizeBytes: 2048, status: 'ready', error: null, chunkCount: 4, charCount: 1900, pages: null, tags: [], embeddingModel: 'openai/text-embedding-3-small', createdAt: new Date(Date.now() - 3600e3).toISOString() },
+        { id: 2, name: 'Q3 pricing deck.pdf', kind: 'pdf', sizeBytes: 1_200_000, status: 'processing', error: null, chunkCount: 0, charCount: 0, pages: 24, tags: [], embeddingModel: null, createdAt: new Date().toISOString() },
+      ],
+      ready: 1,
+      chunks: 4,
+      vectorIndex: 'postgres',
+      embeddingModel: 'openai/text-embedding-3-small',
+      ragEnabled: ragOn,
+    }),
+    uploadDocumentsDialog: async () => [],
+    uploadDocument: async () => null,
+    documentDetail: async (id) => ({ id, name: 'refund-policy.md', kind: 'markdown', sizeBytes: 2048, status: 'ready', error: null, chunkCount: 2, charCount: 1900, pages: null, tags: [], embeddingModel: 'openai/text-embedding-3-small', createdAt: new Date().toISOString(), chunks: [
+      { id: 1, idx: 0, heading: 'Refund policy', page: null, content: 'Customers may request a refund within 30 days of purchase. Refunds are issued to the original payment method.', charCount: 110, embedded: true },
+      { id: 2, idx: 1, heading: 'Refund policy > Exceptions', page: null, content: 'Final-sale accessories are not refundable. Enterprise contracts follow their own terms.', charCount: 90, embedded: true },
+    ] }),
+    deleteDocument: async () => ({ ok: true }),
+    searchDocuments: async (q) => [{ id: 2, document: 'refund-policy.md', documentId: 1, heading: 'Refund policy > Exceptions', page: null, content: `Final-sale accessories are not refundable (matched “${q}”). Enterprise contracts follow their own terms.`, score: 0.03, similarity: 0.71 }],
+    setRag: async (enabled) => {
+      ragOn = enabled;
+      return { enabled };
+    },
+    dbRows: async (q) => ({ table: q.table, columns: ['id', 'email', 'full_name', 'country', 'segment', 'created_at'], rows: Array.from({ length: q.limit ?? 50 }, (_, i) => [i + 1 + (q.offset ?? 0), `user${i + 1 + (q.offset ?? 0)}@example.com`, ['Ada Lovelace', 'Grace Hopper', 'Linus Torvalds'][i % 3], ['US', 'GB', 'DE'][i % 3], ['consumer', 'smb', 'enterprise'][i % 3], '2026-03-01T10:00:00+00:00']), limit: q.limit ?? 50, offset: q.offset ?? 0, total: 120, estimate: 120 }),
+    dbQuery: async (sql) => (/^\s*select/i.test(sql) ? { columns: ['n'], rows: [[1500]], rowCount: 1, truncated: false, ms: 12, error: null, statementTypes: ['SELECT'] } : { columns: [], rows: [], rowCount: 0, truncated: false, ms: 0, error: 'Only read-only statements run here (DELETE). Ask the agent to make changes; it will request your approval.', statementTypes: ['DELETE'] }),
+    dbErd: async () => ({ tables: 4, mermaid: `erDiagram\n    customers {\n        bigint id PK\n        text email UK\n        text full_name\n        text segment "values: consumer, smb, enterprise"\n    }\n    orders {\n        bigint id PK\n        bigint customer_id FK\n        text status "values: pending, paid, shipped"\n        timestamptz ordered_at\n    }\n    order_items {\n        bigint id PK\n        bigint order_id FK\n        bigint product_id FK\n        int quantity\n        numeric unit_price\n    }\n    products {\n        bigint id PK\n        text sku UK\n        text category\n        numeric unit_price\n    }\n    customers ||--o{ orders : "customer_id"\n    orders ||--o{ order_items : "order_id"\n    products ||--o{ order_items : "product_id"\n` }),
     windowMinimize: async () => undefined,
     windowMaximize: async () => undefined,
     windowClose: async () => undefined,
