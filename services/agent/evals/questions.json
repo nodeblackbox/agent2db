@@ -1,0 +1,38 @@
+[
+  {
+    "id": "count_customers",
+    "question": "How many customers do we have in sandbox_data?",
+    "expected_sql": "select count(*) from sandbox_data.customers",
+    "match": "numbers"
+  },
+  {
+    "id": "orders_by_status",
+    "question": "In the sandbox_data schema, how many orders are refunded?",
+    "expected_sql": "select count(*) from sandbox_data.orders where status = 'refunded'",
+    "match": "numbers"
+  },
+  {
+    "id": "top_customers",
+    "question": "Who are the top 3 customers by revenue in sandbox_data? Revenue is quantity * unit_price over paid and shipped orders. Give names and totals.",
+    "expected_sql": "select c.full_name, round(sum(oi.quantity * oi.unit_price), 2) from sandbox_data.customers c join sandbox_data.orders o on o.customer_id = c.id join sandbox_data.order_items oi on oi.order_id = o.id where o.status in ('paid','shipped') group by c.id order by 2 desc limit 3",
+    "match": "auto"
+  },
+  {
+    "id": "revenue_last_30_days",
+    "question": "What was total revenue (paid + shipped orders, quantity * unit_price) in sandbox_data over the last 30 days?",
+    "expected_sql": "select round(sum(oi.quantity * oi.unit_price), 2) from sandbox_data.orders o join sandbox_data.order_items oi on oi.order_id = o.id where o.status in ('paid','shipped') and o.ordered_at >= now() - interval '30 days'",
+    "match": "numbers"
+  },
+  {
+    "id": "best_category",
+    "question": "Which product category sells the most units in sandbox_data (all orders)?",
+    "expected_sql": "select p.category from sandbox_data.order_items oi join sandbox_data.products p on p.id = oi.product_id group by p.category order by sum(oi.quantity) desc limit 1",
+    "match": "auto"
+  },
+  {
+    "id": "enterprise_share",
+    "question": "How many enterprise-segment customers are there in sandbox_data, and how many of them have at least one order?",
+    "expected_sql": "select count(*), count(*) filter (where exists (select 1 from sandbox_data.orders o where o.customer_id = c.id)) from sandbox_data.customers c where segment = 'enterprise'",
+    "match": "numbers"
+  }
+]
