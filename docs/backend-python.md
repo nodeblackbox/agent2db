@@ -46,18 +46,28 @@ services/agent/
 - Health: `GET /health`. Shutdown: Electron sends SIGTERM (Windows: terminates the process
   tree), backend checkpoints in-flight runs.
 
-## Implemented (v0.1)
+## Implemented (v0.2)
 
-Code lives in `services/agent` (see its README). It is verified live against the dev DB with
-`anthropic/claude-sonnet-5-5` and `openai/gpt-5-mini`: create table, insert, count, a rejected
-drop, an approved drop, and follow-up questions in the same session.
+Code lives in `services/agent` (see its README for modules, env vars, CLIs and the full route table).
+Verified live against the dev DB on 2026-10-02 with `anthropic/claude-sonnet-5-5`: read questions,
+an UPDATE that paused for approval with a planner estimate, a backend kill and restart with the
+approval still pending, resume, execution and verification; `agent2db-eval` 6/6.
 
-- Checkpointer is `InMemorySaver` for now (sessions are lost on restart; Postgres checkpointer is Phase 2).
-- MCP client: official MCP SDK 2.x, not LangChain (see mcp-integration.md).
-- SSE event types: `step`, `token`, `message`, `tool_call`, `tool_result`, `approval_required`,
-  `error`, `done{status: completed|awaiting_approval|failed|cancelled}`. Every event has an
-  increasing `id`. After a resume, reconnect with `GET /runs/{id}/events?after=<last id>`.
+- Checkpointer: `langgraph-checkpoint-postgres` in the app DB, driven from worker threads
+  (`checkpointer.py`), so sessions and pending approvals survive restarts. Falls back to
+  `InMemorySaver` if the app DB is unavailable.
+- Persistence: sessions, runs, events, approvals, saved queries, facts, schema index (`store.py`,
+  sync psycopg pool + `asyncio.to_thread`; async psycopg needs a selector loop, MCP stdio on Windows
+  needs Proactor).
+- Schema retrieval: `schema_index.py` (cards + fingerprint refresh + BM25/embeddings + FK expansion).
+- MCP client: official MCP SDK 2.x, not LangChain (see mcp-integration.md). Internal tools
+  (`schema__*`, `memory__*`) are merged with MCP tools in `tools.Toolbox`.
+- SSE event types: `step`, `token`, `message`, `tool_call`, `tool_result`, `usage`
+  (cumulative tokens/cost for the run), `approval_required` (with `estimate` and `tables`),
+  `error`, `done{status, usage, steps}`. Every event has an increasing `id`. After a resume or
+  reconnect, use `GET /runs/{id}/events?after=<last id>`.
 - Run request: `{message, session_id?, model?}`. Resume: `{decision: approve|reject, feedback?}`.
+- Migrations: SQL files in `services/agent/migrations/`, applied at startup (not Alembic).
 
 ## API sketch
 

@@ -20,3 +20,6 @@ venv/
 Thumbs.db
 .vscode/
 .idea/
+
+# Benchmark output
+services/agent/evals/last_run.json

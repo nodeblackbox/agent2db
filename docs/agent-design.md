@@ -40,16 +40,25 @@ START
   (LangGraph v1.2 graceful shutdown).
 - **Token budget:** history trimmed by tokens, oldest turns summarised into session memory.
 
-## Schema context strategy (the big upgrade over Chat2DB)
+## Schema context strategy (the big upgrade over Chat2DB) — implemented in `schema_index.py`
 
-1. **Index once per connection** (and on schema change): for every table store name, comment,
-   columns, PK/FK, row estimate (`pg_class.reltuples`) and a short generated description.
-   Embed the description with pgvector.
-2. **At question time:** embed the question → top-k tables by similarity → expand one hop
-   along foreign keys → add tables named explicitly by the user → cap at a token budget.
-3. **Render as real DDL** plus keys and indexes (proven format from Chat2DB), with sample
-   values for low-cardinality enum-like columns.
-4. **Fallback tools** `list_tables` / `describe_table` stay available when ranking misses.
+1. **Index once per connection, refresh on schema change.** Every table becomes a card: kind,
+   comment, columns (type, nullability, default, comment), PK/FK/unique/check constraints, indexes,
+   row estimate (`pg_class.reltuples`), and sample values for enum-like columns (native enums, or
+   text columns named like `status`/`type`/`category`... with ≤ 8 distinct values in a 5000-row
+   sample). Cards are stored in `agent2db.schema_index`. A fingerprint (md5 over every
+   schema.table.column:type) is computed with one catalog query at the start of each request; a
+   mismatch rebuilds the index.
+2. **At question time:** BM25 over the card descriptions (identifier-aware tokeniser: `orderItems`
+   → `order item`, plurals singularised), fused by reciprocal rank with cosine similarity over
+   embeddings when an embedding model is configured (`real[]`, compared in Python — no pgvector
+   needed); tables the user named are forced to the top; the top-k is expanded one hop along
+   foreign keys; rendering stops at a character budget. Small databases (≤ k tables) are shown in
+   full. Remaining tables are listed by name with row counts.
+3. **Render as real DDL** plus keys and indexes (proven format from Chat2DB), with the sample
+   values as comments.
+4. **Fallback tools** `schema__search_tables` / `schema__describe_table` (served from the index,
+   no catalog round-trip) and the MCP `list_objects` / `get_object_details` stay available.
 
 ## Query types (prompt modes as nodes)
 
@@ -103,11 +112,27 @@ Same format as Anthropic Agent Skills: a folder per skill with `SKILL.md` (YAML 
 
 ## Memory and knowledge graph
 
-- **Session memory:** summarised older turns per session.
-- **Long-term memory:** facts the agent or user confirm ("`orders.status` 3 = refunded"),
-  stored as knowledge-graph nodes/edges in Postgres with pgvector embeddings, linked to tables
-  and columns. Retrieved during `retrieve_context`.
-- Apache AGE (Cypher in Postgres) is optional later; plain tables are enough for v1.
+- **Session memory (implemented):** the full history lives in the LangGraph checkpoint; the prompt
+  gets a size-trimmed view (`trim_history`): older tool results are shortened first, then whole
+  old turns are dropped behind a one-line note. Summarisation of dropped turns is not done yet.
+- **Long-term memory (implemented):** `agent2db.facts` ("`orders.status` 3 = refunded", with an
+  optional subject table/column) and `agent2db.saved_queries`, both with full-text search. The
+  agent reads and writes them through `memory__remember` / `memory__recall` /
+  `memory__save_query` / `memory__search_saved_queries`; `retrieve_context` injects the matches
+  for the current question into the prompt. The UI and external tools manage them via `/facts`
+  and `/saved-queries`.
+- **Knowledge graph (not yet):** facts carry a `subject` but there are no edges or graph queries.
+  Plain tables are enough for now; Apache AGE remains optional later.
+
+## Budgets and accounting (implemented)
+
+- Step cap per request (`AGENT2DB_MAX_STEPS`): when reached, tools are removed and the model must answer.
+- Tool output cap for the model (`AGENT2DB_MAX_TOOL_CHARS`); the UI gets the full result.
+- History cap (`AGENT2DB_MAX_HISTORY_CHARS`); schema cap (`AGENT2DB_SCHEMA_MAX_TABLES/CHARS`).
+- Tokens and cost per model call are captured from LiteLLM (`stream_options.include_usage`,
+  `completion_cost`), accumulated per run, streamed as `usage` events and stored on the run.
+- Model fallbacks (`AGENT2DB_FALLBACK_MODELS`) on rate limits, outages, auth errors and timeouts,
+  but only before any text has been streamed for that turn.
 
 ## Model access (LiteLLM)
 

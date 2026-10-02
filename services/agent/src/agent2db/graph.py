@@ -251,7 +251,7 @@ def build_graph(
             sql = args.get("sql") if args and isinstance(args.get("sql"), str) else None
             if sql and analyze_sql(sql).read_only:
                 continue  # a plain SELECT through the write server needs no approval
-            payload = await approval_payload(call, args or {}, settings.read_dsn)
+            payload = await approval_payload(call, args or {}, settings.write_dsn or settings.read_dsn)
             answer = interrupt(payload)
             decisions[call["id"]] = answer if isinstance(answer, dict) else {"decision": str(answer)}
         return {"decisions": decisions}

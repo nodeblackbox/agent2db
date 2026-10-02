@@ -154,6 +154,10 @@ async def run_all(only: list[str], model: str | None, verbose: bool) -> int:
 
 
 def main() -> None:
+    # Model answers contain characters the Windows console code page cannot encode.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Run the Agent2DB question benchmark.")
     parser.add_argument("--only", action="append", default=[], help="case id (repeatable)")
     parser.add_argument("--model", default=None)

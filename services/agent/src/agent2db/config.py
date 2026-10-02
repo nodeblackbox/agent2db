@@ -56,6 +56,9 @@ class Settings:
     mcp_config: Path | None
     read_dsn: str | None
     app_dsn: str | None = None
+    # EXPLAIN of an UPDATE/DELETE needs the write privilege even though nothing executes, so impact
+    # estimates run on the write role inside a read-only transaction.
+    write_dsn: str | None = None
     fallback_models: list[str] = field(default_factory=list)
     embedding_model: str | None = None
     max_history_chars: int = 60_000
@@ -88,6 +91,7 @@ class Settings:
             mcp_config=mcp_path,
             read_dsn=os.environ.get("AGENT2DB_RO_DSN") or os.environ.get("DATABASE_URL") or None,
             app_dsn=app_dsn,
+            write_dsn=os.environ.get("AGENT2DB_RW_DSN") or None,
             fallback_models=_list_env("AGENT2DB_FALLBACK_MODELS"),
             embedding_model=embedding or None,
             max_history_chars=_int_env("AGENT2DB_MAX_HISTORY_CHARS", 60_000),

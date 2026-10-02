@@ -21,7 +21,12 @@ log = logging.getLogger(__name__)
 
 
 def _modify_rows(plan: dict[str, Any]) -> float | None:
+    # Since PostgreSQL 14 the ModifyTable node itself reports 0 rows (nothing is returned); the
+    # number of rows it will modify is the row estimate of its input plan.
     if plan.get("Node Type") == "ModifyTable":
+        children = plan.get("Plans") or ()
+        if children:
+            return sum(float(child.get("Plan Rows") or 0) for child in children)
         return plan.get("Plan Rows")
     for child in plan.get("Plans") or ():
         found = _modify_rows(child)

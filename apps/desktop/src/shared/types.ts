@@ -38,6 +38,7 @@ export type RunEvent =
       statementTypes: string[];
       warnings: string[];
     }
+  | { type: 'usage'; tokensIn: number; tokensOut: number; costUsd: number; calls: number; model: string | null }
   | { type: 'error'; message: string }
   | { type: 'done'; status: RunDoneStatus };
 
@@ -98,6 +99,17 @@ export function parseRunEvent(type: string, data: unknown): RunEvent | null {
         statementTypes: isStrArray(data.statement_types) ? data.statement_types : [],
         warnings: isStrArray(data.warnings) ? data.warnings : [],
       };
+    case 'usage': {
+      const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+      return {
+        type,
+        tokensIn: num(data.tokens_in),
+        tokensOut: num(data.tokens_out),
+        costUsd: num(data.cost_usd),
+        calls: num(data.calls),
+        model: isStr(data.model) ? data.model : null,
+      };
+    }
     case 'error':
       return isStr(data.message) ? { type, message: data.message } : null;
     case 'done':

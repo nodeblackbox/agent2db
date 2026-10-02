@@ -14,6 +14,14 @@ export type ChatItem =
 
 export type ApprovalRequest = Extract<RunEvent, { type: 'approval_required' }>;
 
+export interface UsageTotals {
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number;
+}
+
+export const zeroUsage: UsageTotals = { tokensIn: 0, tokensOut: 0, costUsd: 0 };
+
 export interface ActiveRun {
   runId: string;
   status: 'running' | 'awaiting_approval';
@@ -21,6 +29,8 @@ export interface ActiveRun {
   lastSeq: number;
   /** Assistant item receiving streamed tokens for the current LLM turn, if any. */
   turnItemId: number | null;
+  /** Cumulative usage reported by the backend for this run so far. */
+  usage: UsageTotals;
 }
 
 export interface ChatState {
@@ -31,6 +41,24 @@ export interface ChatState {
   run: ActiveRun | null;
   approval: ApprovalRequest | null;
   nextId: number;
+  /** Usage of finished runs in this chat; add `run.usage` for the live total. */
+  usage: UsageTotals;
+}
+
+export function totalUsage(s: ChatState): UsageTotals {
+  const live = s.run?.usage ?? zeroUsage;
+  return {
+    tokensIn: s.usage.tokensIn + live.tokensIn,
+    tokensOut: s.usage.tokensOut + live.tokensOut,
+    costUsd: s.usage.costUsd + live.costUsd,
+  };
+}
+
+export function formatUsage(u: UsageTotals): string {
+  const tokens = u.tokensIn + u.tokensOut;
+  const tok = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+  const cost = u.costUsd >= 0.01 ? `$${u.costUsd.toFixed(2)}` : u.costUsd > 0 ? `$${u.costUsd.toFixed(4)}` : '$0';
+  return `${tok} tokens · ${cost}`;
 }
 
 export type ChatAction =
@@ -49,6 +77,7 @@ export const initialChatState: ChatState = {
   run: null,
   approval: null,
   nextId: 1,
+  usage: zeroUsage,
 };
 
 export function isBusy(s: ChatState): boolean {
@@ -117,6 +146,9 @@ function applyEvent(s: ChatState, ev: RunEvent): ChatState {
     }
     case 'approval_required':
       return { ...closeTurn(s), approval: ev };
+    case 'usage':
+      // Cumulative for the run, so replace rather than add.
+      return { ...s, run: { ...run, usage: { tokensIn: ev.tokensIn, tokensOut: ev.tokensOut, costUsd: ev.costUsd } } };
     case 'error':
       return push(closeTurn(s), { kind: 'notice', tone: 'error', text: ev.message });
     case 'done': {
@@ -124,7 +156,17 @@ function applyEvent(s: ChatState, ev: RunEvent): ChatState {
       if (ev.status === 'awaiting_approval') {
         return { ...s2, run: { ...s2.run!, status: 'awaiting_approval', step: null } };
       }
-      let s3: ChatState = { ...s2, run: null, approval: null };
+      const finished = s2.run!.usage;
+      let s3: ChatState = {
+        ...s2,
+        run: null,
+        approval: null,
+        usage: {
+          tokensIn: s2.usage.tokensIn + finished.tokensIn,
+          tokensOut: s2.usage.tokensOut + finished.tokensOut,
+          costUsd: s2.usage.costUsd + finished.costUsd,
+        },
+      };
       if (ev.status === 'cancelled') s3 = push(s3, { kind: 'notice', tone: 'info', text: 'Run cancelled.' });
       if (ev.status === 'failed') {
         const last = s3.items[s3.items.length - 1];
@@ -147,7 +189,7 @@ export function chatReducer(s: ChatState, a: ChatAction): ChatState {
         starting: false,
         sessionId: a.sessionId,
         approval: null,
-        run: { runId: a.runId, status: 'running', step: null, lastSeq: -1, turnItemId: null },
+        run: { runId: a.runId, status: 'running', step: null, lastSeq: -1, turnItemId: null, usage: zeroUsage },
       };
     case 'run_start_failed':
       return push({ ...s, starting: false }, { kind: 'notice', tone: 'error', text: a.message });

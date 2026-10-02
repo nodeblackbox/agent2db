@@ -82,9 +82,18 @@ token for external clients, bound to `127.0.0.1`.
 
 ## Relationship to Agent Runs
 
-Every MCP tool call is a node event in the run trace (server, tool, arguments, duration,
-result size). Write-capable calls pass through the approval node first. Results over the row cap
-are truncated for the model and stored in full for the UI.
+Every MCP tool call is a node event in the run trace (server, tool, arguments, result, error
+flag). Write-capable calls pass through the approval node first, where the SQL is parsed with
+pglast and an impact estimate is attached: `EXPLAIN (FORMAT JSON)` on the **write** DSN inside a
+read-only transaction for DML (the planner needs the write privilege even though nothing runs;
+since PostgreSQL 14 the row count is the ModifyTable node's input estimate), and `pg_class`
+row estimates of the named tables for DROP/TRUNCATE. Results over the cap are truncated for the
+model and stored in full for the UI.
+
+Internal tools (`schema__describe_table`, `schema__search_tables`, `memory__remember`,
+`memory__recall`, `memory__save_query`, `memory__search_saved_queries`) sit next to the MCP tools
+behind the same `Toolbox` interface and use the same `<server>__<tool>` naming, so the UI and the
+approval policy treat them uniformly.
 
 ## Open Questions
 

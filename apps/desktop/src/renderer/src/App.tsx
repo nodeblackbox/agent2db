@@ -5,7 +5,7 @@ import { Composer } from './components/Composer';
 import { Header } from './components/Header';
 import { Markdown } from './components/Markdown';
 import { ToolCard } from './components/ToolCard';
-import { chatReducer, initialChatState, isBusy } from './state';
+import { chatReducer, formatUsage, initialChatState, isBusy, totalUsage } from './state';
 
 const api = window.agent2db;
 
@@ -82,6 +82,7 @@ export function App() {
   );
 
   const busy = isBusy(chat);
+  const usage = totalUsage(chat);
   const ready = status.state === 'ready';
   const awaiting = chat.run?.status === 'awaiting_approval';
 
@@ -131,6 +132,12 @@ export function App() {
         {busy && !awaiting && (
           <div className="run-status">
             <span className="spinner" /> {chat.starting ? 'Starting…' : chat.run?.step ? `Working: ${chat.run.step}` : 'Working…'}
+            {chat.run && chat.run.usage.tokensIn > 0 && <span className="muted"> · {formatUsage(chat.run.usage)}</span>}
+          </div>
+        )}
+        {!busy && chat.items.length > 0 && usage.tokensIn + usage.tokensOut > 0 && (
+          <div className="run-status muted" title="Tokens and estimated cost for this chat">
+            This chat: {formatUsage(usage)}
           </div>
         )}
       </main>
