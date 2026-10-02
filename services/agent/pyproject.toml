@@ -19,6 +19,9 @@ dependencies = [
     "python-dotenv>=1.2.4",
     "sse-starlette>=3.5.0",
     "uvicorn>=0.54.0",
+    "pypdf>=6.19.0",
+    "python-docx>=1.2.0",
+    "qdrant-client>=1.19.1",
 ]
 
 [project.scripts]
