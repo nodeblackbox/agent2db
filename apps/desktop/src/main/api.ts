@@ -4,19 +4,36 @@
  */
 import { SseParser } from '../shared/sse';
 import {
+  parseApprovals,
+  parseFacts,
   parseHealth,
+  parseHistory,
   parseRunEvent,
+  parseSavedQueries,
+  parseSchemaSearch,
+  parseSchemaTable,
+  parseSchemaTables,
+  parseSessionList,
   parseStartRunResponse,
+  type ApprovalRecord,
+  type Fact,
   type HealthResponse,
+  type HistoryEvent,
   type ResumeRunArgs,
   type RunDoneStatus,
   type RunEvent,
   type RunEventEnvelope,
+  type SavedQuery,
+  type SchemaSearchHit,
+  type SchemaTableDetail,
+  type SchemaTableSummary,
+  type SessionSummary,
   type StartRunArgs,
   type StartRunResult,
 } from '../shared/types';
 
 const REQUEST_TIMEOUT_MS = 30_000;
+const LONG_REQUEST_TIMEOUT_MS = 180_000; // schema reindex on a large database
 
 export class BackendHttpError extends Error {
   constructor(
@@ -32,6 +49,8 @@ export interface StreamOutcome {
   done: RunDoneStatus | null;
 }
 
+const okOf = (r: unknown): { ok: boolean } => ({ ok: typeof r === 'object' && r !== null && (r as { ok?: unknown }).ok === true });
+
 export class BackendClient {
   readonly baseUrl: string;
 
@@ -46,12 +65,12 @@ export class BackendClient {
     return { Authorization: `Bearer ${this.token}`, ...extra };
   }
 
-  private async requestJson(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+  private async requestJson(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
     const res = await fetch(this.baseUrl + path, {
       method,
       headers: this.headers(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       redirect: 'error',
     });
     const text = await res.text();
@@ -71,6 +90,8 @@ export class BackendClient {
     return h;
   }
 
+  // ---------- runs ----------
+
   async startRun(args: StartRunArgs): Promise<StartRunResult> {
     const body: Record<string, string> = { message: args.message };
     if (args.sessionId) body.session_id = args.sessionId;
@@ -83,14 +104,70 @@ export class BackendClient {
   async resumeRun(args: ResumeRunArgs): Promise<{ ok: boolean }> {
     const body: Record<string, string> = { decision: args.decision };
     if (args.feedback) body.feedback = args.feedback;
-    const r = await this.requestJson('POST', `/runs/${encodeURIComponent(args.runId)}/resume`, body);
-    return { ok: typeof r === 'object' && r !== null && (r as { ok?: unknown }).ok === true };
+    return okOf(await this.requestJson('POST', `/runs/${encodeURIComponent(args.runId)}/resume`, body));
   }
 
   async cancelRun(runId: string): Promise<{ ok: boolean }> {
-    const r = await this.requestJson('POST', `/runs/${encodeURIComponent(runId)}/cancel`);
-    return { ok: typeof r === 'object' && r !== null && (r as { ok?: unknown }).ok === true };
+    return okOf(await this.requestJson('POST', `/runs/${encodeURIComponent(runId)}/cancel`));
   }
+
+  // ---------- sessions, schema, memory, approvals ----------
+
+  async listSessions(): Promise<SessionSummary[]> {
+    return parseSessionList(await this.requestJson('GET', '/sessions?limit=200'));
+  }
+
+  async sessionHistory(sessionId: string): Promise<HistoryEvent[]> {
+    return parseHistory(await this.requestJson('GET', `/sessions/${encodeURIComponent(sessionId)}/events`));
+  }
+
+  async deleteSession(sessionId: string): Promise<{ ok: boolean }> {
+    return okOf(await this.requestJson('DELETE', `/sessions/${encodeURIComponent(sessionId)}`));
+  }
+
+  async schemaTables(): Promise<SchemaTableSummary[]> {
+    return parseSchemaTables(await this.requestJson('GET', '/schema'));
+  }
+
+  async schemaSearch(query: string): Promise<SchemaSearchHit[]> {
+    return parseSchemaSearch(await this.requestJson('GET', `/schema/search?q=${encodeURIComponent(query)}&limit=20`));
+  }
+
+  async schemaTable(name: string): Promise<SchemaTableDetail | null> {
+    try {
+      return parseSchemaTable(await this.requestJson('GET', `/schema/tables/${encodeURIComponent(name)}`));
+    } catch (e) {
+      if (e instanceof BackendHttpError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  async schemaReindex(): Promise<{ ok: boolean }> {
+    await this.requestJson('POST', '/schema/reindex', undefined, LONG_REQUEST_TIMEOUT_MS);
+    return { ok: true };
+  }
+
+  async listFacts(): Promise<Fact[]> {
+    return parseFacts(await this.requestJson('GET', '/facts'));
+  }
+
+  async deleteFact(id: number): Promise<{ ok: boolean }> {
+    return okOf(await this.requestJson('DELETE', `/facts/${id}`));
+  }
+
+  async listSavedQueries(): Promise<SavedQuery[]> {
+    return parseSavedQueries(await this.requestJson('GET', '/saved-queries'));
+  }
+
+  async deleteSavedQuery(id: number): Promise<{ ok: boolean }> {
+    return okOf(await this.requestJson('DELETE', `/saved-queries/${id}`));
+  }
+
+  async listApprovals(): Promise<ApprovalRecord[]> {
+    return parseApprovals(await this.requestJson('GET', '/approvals?limit=200'));
+  }
+
+  // ---------- events ----------
 
   /**
    * Open the SSE stream for a run and deliver validated events until `done` or EOF.

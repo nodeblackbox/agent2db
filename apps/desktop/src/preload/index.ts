@@ -3,7 +3,7 @@
  * invoke channel. Callbacks receive only payloads (never the IpcRendererEvent).
  */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import { IPC, type Agent2DbApi, type BackendStatus, type RunEventEnvelope } from '../shared/types';
+import { IPC, type Agent2DbApi, type BackendStatus, type RunEventEnvelope, type WindowState } from '../shared/types';
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   if (typeof cb !== 'function') throw new TypeError('callback must be a function');
@@ -22,6 +22,22 @@ const api: Agent2DbApi = {
   resumeRun: (runId, decision, feedback) => ipcRenderer.invoke(IPC.resumeRun, { runId, decision, feedback }),
   cancelRun: (runId) => ipcRenderer.invoke(IPC.cancelRun, runId),
   onRunEvent: (cb) => subscribe<RunEventEnvelope>(IPC.runEvent, cb),
+  listSessions: () => ipcRenderer.invoke(IPC.listSessions),
+  sessionHistory: (sessionId) => ipcRenderer.invoke(IPC.sessionHistory, sessionId),
+  deleteSession: (sessionId) => ipcRenderer.invoke(IPC.deleteSession, sessionId),
+  schemaTables: () => ipcRenderer.invoke(IPC.schemaTables),
+  schemaSearch: (query) => ipcRenderer.invoke(IPC.schemaSearch, query),
+  schemaTable: (name) => ipcRenderer.invoke(IPC.schemaTable, name),
+  schemaReindex: () => ipcRenderer.invoke(IPC.schemaReindex),
+  listFacts: () => ipcRenderer.invoke(IPC.listFacts),
+  deleteFact: (id) => ipcRenderer.invoke(IPC.deleteFact, id),
+  listSavedQueries: () => ipcRenderer.invoke(IPC.listSavedQueries),
+  deleteSavedQuery: (id) => ipcRenderer.invoke(IPC.deleteSavedQuery, id),
+  listApprovals: () => ipcRenderer.invoke(IPC.listApprovals),
+  windowMinimize: () => ipcRenderer.invoke(IPC.windowMinimize),
+  windowMaximize: () => ipcRenderer.invoke(IPC.windowMaximize),
+  windowClose: () => ipcRenderer.invoke(IPC.windowClose),
+  onWindowState: (cb) => subscribe<WindowState>(IPC.windowState, cb),
 };
 
 contextBridge.exposeInMainWorld('agent2db', api);

@@ -9,11 +9,16 @@ import { findRepoRoot } from './repoRoot';
 import {
   IPC,
   ValidationError,
+  validateNumericId,
+  validateQuery,
   validateResumeRunArgs,
   validateRunId,
+  validateSessionId,
   validateStartRunArgs,
+  validateTableName,
   type BackendStatus,
   type RunEventEnvelope,
+  type WindowState,
 } from '../shared/types';
 
 const log = (msg: string): void => console.log(`[agent2db] ${msg}`);
@@ -46,13 +51,21 @@ function setStatus(next: BackendStatus): void {
   sendToRenderer(IPC.statusChanged, status);
 }
 
+function windowState(): WindowState {
+  return { maximized: mainWindow?.isMaximized() ?? false, focused: mainWindow?.isFocused() ?? true };
+}
+
+function sendWindowState(): void {
+  sendToRenderer(IPC.windowState, windowState());
+}
+
 // ---------- backend lifecycle ----------
 
 async function refreshHealth(): Promise<void> {
   if (!client) return;
   try {
-    const h = await client.health();
-    if (client) setStatus({ state: 'ready', version: h.version, model: h.model, mcp: h.mcp });
+    const health = await client.health();
+    if (client) setStatus({ state: 'ready', health });
   } catch (e) {
     log(`health check failed: ${(e as Error).message}`);
   }
@@ -86,8 +99,8 @@ async function startBackend(): Promise<void> {
     client = new BackendClient(port, token);
     log(`backend ready on 127.0.0.1:${port}`);
     try {
-      const h = await client.health();
-      setStatus({ state: 'ready', version: h.version, model: h.model, mcp: h.mcp });
+      const health = await client.health();
+      setStatus({ state: 'ready', health });
     } catch (e) {
       setStatus({ state: 'error', message: `Backend started but /health failed: ${(e as Error).message}` });
       return;
@@ -164,10 +177,30 @@ function registerIpc(): void {
     return result;
   });
 
-  handle(IPC.cancelRun, async (raw) => {
-    const runId = validateRunId(raw);
-    return requireClient().cancelRun(runId);
+  handle(IPC.cancelRun, async (raw) => requireClient().cancelRun(validateRunId(raw)));
+
+  // Persisted data. Responses are validated into plain shapes by the client before they reach here.
+  handle(IPC.listSessions, async () => requireClient().listSessions());
+  handle(IPC.sessionHistory, async (raw) => requireClient().sessionHistory(validateSessionId(raw)));
+  handle(IPC.deleteSession, async (raw) => requireClient().deleteSession(validateSessionId(raw)));
+  handle(IPC.schemaTables, async () => requireClient().schemaTables());
+  handle(IPC.schemaSearch, async (raw) => requireClient().schemaSearch(validateQuery(raw)));
+  handle(IPC.schemaTable, async (raw) => requireClient().schemaTable(validateTableName(raw)));
+  handle(IPC.schemaReindex, async () => requireClient().schemaReindex());
+  handle(IPC.listFacts, async () => requireClient().listFacts());
+  handle(IPC.deleteFact, async (raw) => requireClient().deleteFact(validateNumericId(raw)));
+  handle(IPC.listSavedQueries, async () => requireClient().listSavedQueries());
+  handle(IPC.deleteSavedQuery, async (raw) => requireClient().deleteSavedQuery(validateNumericId(raw)));
+  handle(IPC.listApprovals, async () => requireClient().listApprovals());
+
+  // Window controls for the frameless window.
+  handle(IPC.windowMinimize, () => mainWindow?.minimize());
+  handle(IPC.windowMaximize, () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
   });
+  handle(IPC.windowClose, () => mainWindow?.close());
 }
 
 // ---------- window & security ----------
@@ -228,13 +261,14 @@ function hardenSession(): void {
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 820,
-    minWidth: 720,
-    minHeight: 480,
+    width: 1280,
+    height: 860,
+    minWidth: 820,
+    minHeight: 520,
     show: false,
     title: 'Agent2DB',
-    backgroundColor: '#0f1115',
+    backgroundColor: '#09090b',
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -254,7 +288,9 @@ function createWindow(): void {
   mainWindow.webContents.on('did-finish-load', () => {
     log('renderer loaded');
     sendToRenderer(IPC.statusChanged, status);
+    sendWindowState();
   });
+  for (const ev of ['maximize', 'unmaximize', 'focus', 'blur'] as const) mainWindow.on(ev, sendWindowState);
   mainWindow.webContents.on('console-message', (e) => {
     if (e.level === 'warning' || e.level === 'error') log(`renderer ${e.level}: ${e.message}`);
   });
