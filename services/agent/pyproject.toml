@@ -1,0 +1,38 @@
+[project]
+name = "agent2db"
+version = "0.1.0"
+description = "Agent2DB agent backend: FastAPI + LangGraph + MCP + LiteLLM"
+readme = "README.md"
+authors = [
+    { name = "nodeblackbox", email = "nodeblackbox@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.142.2",
+    "langgraph>=1.2",
+    "litellm>=1.83.7",
+    "mcp>=2.2.0",
+    "pglast>=8.4",
+    "psycopg[binary]>=3.3.6",
+    "python-dotenv>=1.2.4",
+    "sse-starlette>=3.5.0",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+agent2db-backend = "agent2db.server:main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

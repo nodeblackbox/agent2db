@@ -25,6 +25,14 @@ Caveats for Postgres MCP Pro:
   official `postgres` Docker image; optimisation tools degrade without it.
 - Last release seen: v0.3.0 (adds Windows support). It documents stdio and SSE, not
   streamable HTTP. We use stdio, so this is fine.
+- **Verified on Windows (2026-10-02):** a bare `uvx postgres-mcp` fails twice over. uv picks a
+  Python with no `pglast==7.2` wheel and tries to compile it, and the unpinned `mcp` resolves to
+  2.x, where `mcp.server.fastmcp` no longer exists. The working command, used in the example
+  config, is `uvx --python 3.12 --with "mcp[cli]<2" postgres-mcp==0.3.0 ...`.
+- Results come back as Python reprs (`[{'x': 1}]`), not JSON, and SQL errors come back as normal
+  text starting with `Error:` rather than `isError`. The backend's `mcp_hub` normalises both.
+- Our backend uses the MCP Python SDK **2.x** client (`ClientSession`, `stdio_client`). 2.x renamed
+  fields to snake_case (`input_schema`, `is_error`).
 
 ## Server set (v1)
 
@@ -47,12 +55,19 @@ Rules:
   from the backend's environment at spawn time.
 - Each server entry may set `"requiresApproval": true` (all tools) or a list of tool names.
 - Each entry may set `"enabled": false`.
+- Each entry may set `"tools": [...]`, an allow-list of the server's tools exposed to the model.
+  `postgres-write` exposes only `execute_sql`, because its schema tools duplicate the read server's.
+- `${VAR:-fallback}` is supported. The example falls back to `DATABASE_URL` when the role DSNs are
+  unset, so dev works before the roles exist.
+- A plain `SELECT` sent to an approval-gated tool runs without approval. pglast classifies it, and
+  data-modifying CTEs, `SELECT INTO` and `EXPLAIN ANALYZE` of writes don't count as plain.
 - The user config lives in the app data folder, not in the repo. Only the example is committed.
 
 ## Client side
 
-- Backend uses LangChain's MCP client: `langchain.mcp` (ships in `langchain` ≥ 1.4, **beta** as
-  of Sep 2026) or the older `langchain-mcp-adapters` until `langchain.mcp` leaves beta.
+- **Implemented:** the backend uses the official MCP Python SDK directly (`agent2db/mcp_hub.py`).
+  There is no LangChain dependency, and the agent graph works on plain OpenAI-format messages.
+  Revisit `langchain.mcp` when it leaves beta if we need elicitation support.
 - MCP elicitation (a server asking a question mid-call) maps to a LangGraph interrupt, which the
   UI shows like an approval prompt.
 - Servers run as stdio child processes of the backend, started on demand and stopped on idle.

@@ -1,0 +1,15 @@
+{
+  "name": "agent2db",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.30.1",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @agent2db/desktop dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  }
+}

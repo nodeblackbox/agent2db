@@ -46,6 +46,19 @@ services/agent/
 - Health: `GET /health`. Shutdown: Electron sends SIGTERM (Windows: terminates the process
   tree), backend checkpoints in-flight runs.
 
+## Implemented (v0.1)
+
+Code lives in `services/agent` (see its README). It is verified live against the dev DB with
+`anthropic/claude-sonnet-5-5` and `openai/gpt-5-mini`: create table, insert, count, a rejected
+drop, an approved drop, and follow-up questions in the same session.
+
+- Checkpointer is `InMemorySaver` for now (sessions are lost on restart; Postgres checkpointer is Phase 2).
+- MCP client: official MCP SDK 2.x, not LangChain (see mcp-integration.md).
+- SSE event types: `step`, `token`, `message`, `tool_call`, `tool_result`, `approval_required`,
+  `error`, `done{status: completed|awaiting_approval|failed|cancelled}`. Every event has an
+  increasing `id`. After a resume, reconnect with `GET /runs/{id}/events?after=<last id>`.
+- Run request: `{message, session_id?, model?}`. Resume: `{decision: approve|reject, feedback?}`.
+
 ## API sketch
 
 | Method | Path | Purpose |

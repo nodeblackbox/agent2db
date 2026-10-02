@@ -6,8 +6,8 @@
 
 - [ ] Confirm open decisions (Python agent core, Docker for sandbox, UI kit).
 - [ ] Initialise git; add `.gitignore` check, `gitleaks` pre-commit hook.
-- [ ] Monorepo skeleton: `pnpm-workspace.yaml`, `apps/desktop`, `services/agent` (uv).
-- [ ] Record dev Postgres image/version; enable pgvector.
+- [x] Monorepo skeleton: `pnpm-workspace.yaml`, `apps/desktop`, `services/agent` (uv).
+- [ ] Record dev Postgres image/version; enable pgvector. (PostgreSQL 16.15; `vector` is available but not yet enabled)
 - [ ] Rotate exposed keys; create Agent2DB-specific provider keys.
 
 **Done when:** `pnpm dev` opens an Electron window that shows backend `/health` = ok.
@@ -15,10 +15,11 @@
 ## Phase 1 — Read-only agent (MVP)
 
 - [ ] Connection management with keychain storage; role setup helper (`agent2db_ro`).
-- [ ] `postgres-read` MCP server (Postgres MCP Pro, restricted) wired via config.
-- [ ] LangGraph graph: route → retrieve (tool-based) → act → summarise, step cap, SSE events.
-- [ ] LiteLLM router with OpenAI + Anthropic; capability rules with tests.
-- [ ] Chat UI with tool-call trace and result grid.
+- [x] `postgres-read` MCP server (Postgres MCP Pro, restricted) wired via config.
+- [x] LangGraph graph: retrieve (schema digest + tools) → agent → approval → tools, step cap, SSE events.
+- [x] LiteLLM with OpenAI + Anthropic (others by key); capability rules with tests. (No fallback router yet.)
+- [x] Pulled forward from Phase 2: `postgres-write` with approval interrupt, pglast classification.
+- [x] Chat UI with tool-call trace, result grid and approval dialog (verified against the real backend).
 
 **Done when:** asking "top 10 customers by revenue last month" on a sample DB returns correct
 SQL, results and an explanation, with a visible trace.

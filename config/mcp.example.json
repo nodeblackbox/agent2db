@@ -2,20 +2,21 @@
   "mcpServers": {
     "postgres-read": {
       "command": "uvx",
-      "args": ["postgres-mcp", "--access-mode=restricted"],
+      "args": ["--python", "3.12", "--with", "mcp[cli]<2", "postgres-mcp==0.3.0", "--access-mode=restricted"],
       "env": {
-        "DATABASE_URI": "${AGENT2DB_RO_DSN}"
+        "DATABASE_URI": "${AGENT2DB_RO_DSN:-${DATABASE_URL}}"
       },
       "enabled": true,
       "requiresApproval": false
     },
     "postgres-write": {
       "command": "uvx",
-      "args": ["postgres-mcp", "--access-mode=unrestricted"],
+      "args": ["--python", "3.12", "--with", "mcp[cli]<2", "postgres-mcp==0.3.0", "--access-mode=unrestricted"],
       "env": {
-        "DATABASE_URI": "${AGENT2DB_RW_DSN}"
+        "DATABASE_URI": "${AGENT2DB_RW_DSN:-${DATABASE_URL}}"
       },
-      "enabled": false,
+      "tools": ["execute_sql"],
+      "enabled": true,
       "requiresApproval": true
     },
     "agent2db": {
