@@ -115,3 +115,37 @@ async def test_estimate_impact_uses_explain_in_a_read_only_transaction():
     drop = f"drop table {table['table_name']}"
     estimate = await estimate_impact(DSN, drop, analyze_sql(drop))
     assert estimate == {"kind": "table_rows", "tables": {table["table_name"]: table["row_estimate"] or 0}} or estimate["kind"] == "table_rows"
+
+
+async def test_restart_recovery_only_claims_runs_whose_backend_is_gone(store):
+    """Two backends share one app DB: a live backend's runs must not be marked failed by the other."""
+    from agent2db.runs import RunManager
+
+    live, dead = "live-" + uuid.uuid4().hex[:6], "dead-" + uuid.uuid4().hex[:6]
+    await store.register_backend(live, "test")
+    session = "test-" + uuid.uuid4().hex[:8]
+    await store.ensure_session(session, "x", None)
+    owned_by_live, owned_by_dead, unowned = (uuid.uuid4().hex for _ in range(3))
+    await store.create_run(owned_by_live, session, "a", None, backend_id=live)
+    await store.create_run(owned_by_dead, session, "b", None, backend_id=dead)  # never registered -> gone
+    await store.create_run(unowned, session, "c", None)  # pre-ownership row
+
+    orphans = {r["id"] for r in await store.orphaned_runs(stale_after_seconds=60)}
+    assert owned_by_dead in orphans and unowned in orphans and owned_by_live not in orphans
+
+    class NoGraph:
+        async def aget_state(self, config):
+            raise AssertionError("not needed for running rows")
+
+    manager = RunManager(NoGraph(), store, backend_id="new-" + uuid.uuid4().hex[:6])
+    await manager.restore()
+    assert (await store.get_run(owned_by_live))["status"] == "running"
+    assert (await store.get_run(owned_by_dead))["status"] == "failed"
+    assert (await store.get_run(owned_by_dead))["backend_id"] == manager.backend_id
+    assert (await store.get_run(unowned))["status"] == "failed"
+
+    # The live backend finishing its run clears any stale error and keeps ownership.
+    await store.finish_run(owned_by_live, "completed", answer="done")
+    row = await store.get_run(owned_by_live)
+    assert row["status"] == "completed" and row["error"] is None and row["backend_id"] == live
+    await store.delete_session(session)

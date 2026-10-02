@@ -113,7 +113,7 @@ async def run_all(only: list[str], model: str | None, verbose: bool) -> int:
     store = AppStore(settings.app_dsn) if settings.app_dsn else None
     if store:
         await store.open()
-    hub = McpHub(load_config(settings.mcp_config))
+    hub = McpHub(load_config(settings.mcp_config), tool_timeout=settings.tool_timeout, log_dir=settings.log_dir)
     await hub.start()
     index = SchemaIndex(store, settings.read_dsn, embedding_model=settings.embedding_model)
     await index.load()

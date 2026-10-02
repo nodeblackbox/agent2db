@@ -38,6 +38,8 @@ one tool call per question with `anthropic/claude-sonnet-5-5`.)
 - [x] Schema index: per-table cards, fingerprint-based refresh, BM25 + optional embeddings, FK
       expansion, explicit-mention boost, budgeted DDL rendering.
 - [x] Token/cost accounting per run, history trimming by size.
+- [x] MCP tool-call timeout; MCP child logs to files; multi-backend ownership with heartbeats so
+      two processes on one app DB never clobber each other's runs.
 - [x] Sample data seeding and a question benchmark (`agent2db-eval`).
 
 **Done when:** an UPDATE request pauses for approval, shows the statement and estimate, and only

@@ -64,6 +64,8 @@ class Settings:
     max_history_chars: int = 60_000
     schema_max_tables: int = 12
     schema_max_chars: int = 14_000
+    tool_timeout: float = 120.0
+    log_dir: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -97,4 +99,6 @@ class Settings:
             max_history_chars=_int_env("AGENT2DB_MAX_HISTORY_CHARS", 60_000),
             schema_max_tables=_int_env("AGENT2DB_SCHEMA_MAX_TABLES", 12),
             schema_max_chars=_int_env("AGENT2DB_SCHEMA_MAX_CHARS", 14_000),
+            tool_timeout=float(_int_env("AGENT2DB_TOOL_TIMEOUT", 120)),
+            log_dir=Path(os.environ.get("AGENT2DB_LOG_DIR") or SERVICE_DIR / "logs"),
         )

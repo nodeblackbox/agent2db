@@ -27,6 +27,12 @@ passes its own. `AGENT2DB_PORT` defaults to a free port; the chosen port is prin
 | `AGENT2DB_MAX_HISTORY_CHARS` | 60000 | conversation history sent to the model; older tool results are shortened, then whole turns dropped |
 | `AGENT2DB_SCHEMA_MAX_TABLES` / `AGENT2DB_SCHEMA_MAX_CHARS` | 12 / 14000 | tables shown in full per request (plus FK neighbours) and their size cap |
 | `AGENT2DB_MCP_CONFIG` | `config/mcp.json`, else `config/mcp.example.json` | MCP servers |
+| `AGENT2DB_TOOL_TIMEOUT` | 120 | seconds an MCP tool call may take; on timeout the model gets an error instead of the run hanging |
+| `AGENT2DB_LOG_DIR` | `services/agent/logs` | MCP child servers log to `mcp-<server>.log` here instead of the backend's stderr |
+
+Several backends may share one app DB (two desktop launches, several cloud instances): each process
+registers in `agent2db.backends` with a 15s heartbeat and owns the runs it drives. Restart recovery
+only adopts unfinished runs whose owner has not heartbeated for 60s. `/health` reports `backend_id`.
 
 ## CLIs
 

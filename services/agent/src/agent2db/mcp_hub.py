@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import ast as pyast
+import asyncio
 import json
 import logging
 import os
 import re
+import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -123,10 +125,16 @@ def normalize_result_text(text: str) -> str:
 @dataclass
 class McpHub:
     servers: list[ServerConfig]
+    # A wedged server must not hang a run forever; the model gets an error and can continue.
+    tool_timeout: float = 120.0
+    # Child servers log to files, not to our stderr: a parent that stops draining stderr would
+    # otherwise block the child on a log write before it can answer on stdout.
+    log_dir: Path | None = None
     status: dict[str, str] = field(default_factory=dict)
     tools: dict[str, Tool] = field(default_factory=dict)
     _sessions: dict[str, ClientSession] = field(default_factory=dict)
     _stack: AsyncExitStack = field(default_factory=AsyncExitStack)
+    _errlogs: list[Any] = field(default_factory=list)
 
     async def start(self) -> None:
         """Start every enabled server. One failing server never blocks the others."""
@@ -141,12 +149,24 @@ class McpHub:
                 log.exception("MCP server %s failed to start", server.name)
                 self.status[server.name] = f"error: {_root_cause(exc)}"
 
+    def _errlog(self, server: ServerConfig) -> Any:
+        if self.log_dir is None:
+            return sys.stderr
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            handle = open(self.log_dir / f"mcp-{server.name}.log", "w", encoding="utf-8", errors="replace")  # noqa: SIM115
+        except OSError as exc:
+            log.warning("cannot open MCP log file for %s (%s); using stderr", server.name, exc)
+            return sys.stderr
+        self._errlogs.append(handle)
+        return handle
+
     async def _start_server(self, server: ServerConfig) -> None:
         env = {**os.environ, **{k: resolve_vars(v) for k, v in server.env.items()}}
         params = StdioServerParameters(command=server.command, args=server.args, env=env)
         stack = AsyncExitStack()
         try:
-            read, write = await stack.enter_async_context(stdio_client(params))
+            read, write = await stack.enter_async_context(stdio_client(params, errlog=self._errlog(server)))
             session = await stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
             listed = await session.list_tools()
@@ -165,7 +185,26 @@ class McpHub:
         tool = self.tools.get(qualified_name)
         if tool is None:
             return ToolResult(f"Unknown tool {qualified_name!r}.", True)
-        result = await self._sessions[tool.server.name].call_tool(tool.name, args)
+        session = self._sessions[tool.server.name]
+        try:
+            result = await asyncio.wait_for(
+                session.call_tool(tool.name, args, read_timeout_seconds=self.tool_timeout),
+                timeout=self.tool_timeout + 5,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            log.error("MCP tool %s timed out after %ss", qualified_name, self.tool_timeout)
+            self.status[tool.server.name] = "error: last call timed out"
+            return ToolResult(
+                f"Error: {qualified_name} did not answer within {int(self.tool_timeout)}s. "
+                "The statement may still be running; check before retrying.",
+                True,
+            )
+        except Exception as exc:  # noqa: BLE001 - a server crash must not take the run down
+            log.exception("MCP tool %s failed", qualified_name)
+            return ToolResult(f"Error: {qualified_name} failed: {_root_cause(exc)}", True)
+        self.status.setdefault(tool.server.name, "connected")
+        if self.status[tool.server.name].startswith("error: last call"):
+            self.status[tool.server.name] = "connected"
         texts = [getattr(part, "text", None) or json.dumps(part.model_dump(), default=str) for part in result.content]
         text = normalize_result_text("\n".join(texts))
         # Postgres MCP Pro reports SQL errors as normal text starting with "Error:".
@@ -177,6 +216,12 @@ class McpHub:
 
     async def close(self) -> None:
         await self._stack.aclose()
+        for handle in self._errlogs:
+            try:
+                handle.close()
+            except OSError:
+                pass
+        self._errlogs.clear()
 
 
 def _root_cause(exc: BaseException) -> str:

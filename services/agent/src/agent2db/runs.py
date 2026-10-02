@@ -69,10 +69,21 @@ class Run:
 
 
 class RunManager:
-    def __init__(self, graph: Any, store: Any | None = None, default_model: str | None = None) -> None:
+    def __init__(
+        self,
+        graph: Any,
+        store: Any | None = None,
+        default_model: str | None = None,
+        backend_id: str | None = None,
+        stale_after_seconds: int = 60,
+    ) -> None:
         self.graph = graph
         self.store = store
         self.default_model = default_model
+        # Identifies this process in the shared app DB so that another backend's restart
+        # recovery never claims runs this process is still driving.
+        self.backend_id = backend_id or uuid.uuid4().hex
+        self.stale_after_seconds = stale_after_seconds
         self.runs: dict[str, Run] = {}
         self._session_runs: dict[str, str] = {}
 
@@ -120,9 +131,10 @@ class RunManager:
         if self.store is None:
             return 0
         restored = 0
-        for row in await self.store.pending_runs():
+        for row in await self.store.orphaned_runs(self.stale_after_seconds):
             run = Run(id=row["id"], session_id=row["session_id"], model=row["model"], status=row["status"], store=self.store)
             run.events = await self.store.list_run_events(run.id)
+            await self.store.claim_run(run.id, self.backend_id)
             if row["status"] == "running":
                 run.status = "failed"
                 await run.emit("error", {"message": "The backend restarted while this run was in progress."})
@@ -159,10 +171,13 @@ class RunManager:
             if self.store is not None:
                 if first_message is not None:
                     await self.store.ensure_session(run.session_id, first_message, run.model or self.default_model)
-                    await self.store.create_run(run.id, run.session_id, first_message, run.model or self.default_model)
+                    await self.store.create_run(
+                        run.id, run.session_id, first_message, run.model or self.default_model, backend_id=self.backend_id
+                    )
                 if decision is not None:
                     pending, verdict, feedback = decision
                     await self.store.set_run_status(run.id, "running")
+                    await self.store.claim_run(run.id, self.backend_id)
                     if pending:
                         await self.store.record_approval_decision(run.id, pending["tool_call_id"], verdict, feedback)
             async for _ in self.graph.astream(graph_input, config, stream_mode="updates"):

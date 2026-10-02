@@ -105,14 +105,57 @@ class AppStore:
 
         await self._run(fn)
 
-    async def create_run(self, run_id: str, session_id: str, message: str, model: str | None) -> None:
+    async def create_run(self, run_id: str, session_id: str, message: str, model: str | None, backend_id: str | None = None) -> None:
         def fn(conn):
             conn.execute(
-                f"insert into {SCHEMA}.runs (id, session_id, status, model, message) values (%s, %s, 'running', %s, %s)",
-                (run_id, session_id, model, message),
+                f"insert into {SCHEMA}.runs (id, session_id, status, model, message, backend_id) values (%s, %s, 'running', %s, %s, %s)",
+                (run_id, session_id, model, message, backend_id),
             )
 
         await self._run(fn)
+
+    # ---------- backend instances (ownership + heartbeat) ----------
+
+    async def register_backend(self, backend_id: str, version: str) -> None:
+        import os
+        import socket
+
+        def fn(conn):
+            conn.execute(
+                f"""insert into {SCHEMA}.backends (id, hostname, pid, version) values (%s, %s, %s, %s)
+                    on conflict (id) do update set heartbeat_at = now()""",
+                (backend_id, socket.gethostname(), os.getpid(), version),
+            )
+            conn.execute(f"delete from {SCHEMA}.backends where heartbeat_at < now() - interval '1 day'")
+
+        await self._run(fn)
+
+    async def heartbeat(self, backend_id: str) -> None:
+        def fn(conn):
+            conn.execute(f"update {SCHEMA}.backends set heartbeat_at = now() where id = %s", (backend_id,))
+
+        await self._run(fn)
+
+    async def claim_run(self, run_id: str, backend_id: str) -> None:
+        def fn(conn):
+            conn.execute(f"update {SCHEMA}.runs set backend_id = %s where id = %s", (backend_id, run_id))
+
+        await self._run(fn)
+
+    async def orphaned_runs(self, stale_after_seconds: int = 60) -> list[dict[str, Any]]:
+        """Unfinished runs whose owning backend is unknown or has stopped heartbeating."""
+
+        def fn(conn):
+            return conn.execute(
+                f"""select r.* from {SCHEMA}.runs r
+                    left join {SCHEMA}.backends b on b.id = r.backend_id
+                    where r.status in ('awaiting_approval', 'running')
+                      and (r.backend_id is null or b.id is null or b.heartbeat_at < now() - make_interval(secs => %s))
+                    order by r.started_at""",
+                (stale_after_seconds,),
+            ).fetchall()
+
+        return await self._run(fn)
 
     async def finish_run(
         self,
@@ -132,7 +175,7 @@ class AppStore:
                        answer = coalesce(%s, answer),
                        tokens_in = coalesce(%s, tokens_in), tokens_out = coalesce(%s, tokens_out),
                        cost_usd = coalesce(%s, cost_usd), steps = coalesce(%s, steps),
-                       error = coalesce(%s, error),
+                       error = case when %s = 'completed' then null else coalesce(%s, error) end,
                        ended_at = case when %s in ('completed', 'failed', 'cancelled') then now() else ended_at end
                    where id = %s""",
                 (
@@ -142,6 +185,7 @@ class AppStore:
                     usage.get("tokens_out"),
                     usage.get("cost_usd"),
                     steps,
+                    status,
                     error,
                     status,
                     run_id,

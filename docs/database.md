@@ -52,7 +52,8 @@ but not read `agent2db.sessions`.
 |---|---|---|
 | `schema_migrations` | applied migration versions | files named `NNNN_*.sql`, applied at backend start |
 | `sessions` | chat sessions | id, title (first message), model, timestamps |
-| `runs` | one agent run per user message | status, message, answer, tokens_in/out, cost_usd, steps, error, timestamps |
+| `runs` | one agent run per user message | status, message, answer, tokens_in/out, cost_usd, steps, error, backend_id (owner), timestamps |
+| `backends` | live backend processes | id, hostname, pid, version, heartbeat_at; recovery adopts runs whose owner is stale (60s) |
 | `run_events` | streamed trace, replayable | (run_id, seq) → type, payload jsonb |
 | `approvals` | every write approval request and its outcome | sql, statement_types, warnings, estimate jsonb, decision, feedback |
 | `saved_queries` | reusable SQL | name (unique), description, sql, tables[], tags[], use_count, generated `search` tsvector |

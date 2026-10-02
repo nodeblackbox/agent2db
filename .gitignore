@@ -23,3 +23,6 @@ Thumbs.db
 
 # Benchmark output
 services/agent/evals/last_run.json
+
+# MCP server logs
+services/agent/logs/

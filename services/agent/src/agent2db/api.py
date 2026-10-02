@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import secrets
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
@@ -22,6 +24,10 @@ from agent2db.store import AppStore, json_ready
 from agent2db.tools import Toolbox, memory_tools, schema_tools
 
 log = logging.getLogger(__name__)
+
+# How often this process proves it is alive in the shared app DB; another backend's restart
+# recovery only claims runs whose owner missed several of these (RunManager.stale_after_seconds).
+HEARTBEAT_SECONDS = 15
 
 
 class StartRunRequest(BaseModel):
@@ -70,7 +76,11 @@ def create_app(settings: Settings, token: str, on_ready: Any = None) -> FastAPI:
                 log.error("Postgres checkpointer unavailable, sessions will not survive restarts: %s", exc)
                 checkpointer = None
 
-        hub = McpHub(load_config(settings.mcp_config)) if settings.mcp_config else McpHub([])
+        hub = McpHub(
+            load_config(settings.mcp_config) if settings.mcp_config else [],
+            tool_timeout=settings.tool_timeout,
+            log_dir=settings.log_dir,
+        )
         await hub.start()
 
         index = SchemaIndex(store, settings.read_dsn, embedding_model=settings.embedding_model)
@@ -86,16 +96,33 @@ def create_app(settings: Settings, token: str, on_ready: Any = None) -> FastAPI:
         app.state.toolbox = toolbox
         app.state.checkpointer = checkpointer
         graph = build_graph(settings, toolbox, checkpointer, schema_index=index, store=store)
-        app.state.runs = RunManager(graph, store, settings.model)
-        try:
-            await app.state.runs.restore()
-        except Exception as exc:  # noqa: BLE001
-            log.warning("could not restore pending runs: %s", exc)
+        backend_id = uuid.uuid4().hex
+        app.state.backend_id = backend_id
+        app.state.runs = RunManager(graph, store, settings.model, backend_id=backend_id)
+        heartbeat_task: asyncio.Task | None = None
+        if store is not None:
+            try:
+                await store.register_backend(backend_id, __version__)
+                await app.state.runs.restore()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("could not register backend / restore pending runs: %s", exc)
+
+            async def heartbeat() -> None:
+                while True:
+                    await asyncio.sleep(HEARTBEAT_SECONDS)
+                    try:
+                        await store.heartbeat(backend_id)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("heartbeat failed: %s", exc)
+
+            heartbeat_task = asyncio.create_task(heartbeat())
         if on_ready:
             on_ready()
         try:
             yield
         finally:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
             await hub.close()
             if checkpointer is not None:
                 checkpointer.close()
@@ -127,6 +154,7 @@ def create_app(settings: Settings, token: str, on_ready: Any = None) -> FastAPI:
         return {
             "status": "ok",
             "version": __version__,
+            "backend_id": request.app.state.backend_id,
             "model": settings.model,
             "fallback_models": settings.fallback_models,
             "mcp": hub.status,
