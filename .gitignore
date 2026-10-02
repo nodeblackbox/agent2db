@@ -1,0 +1,22 @@
+# Secrets
+.env
+*.pem
+*.key
+
+# Node / Electron
+node_modules/
+dist/
+build/
+out/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

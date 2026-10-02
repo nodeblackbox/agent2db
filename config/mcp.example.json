@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "postgres-read": {
+      "command": "uvx",
+      "args": ["postgres-mcp", "--access-mode=restricted"],
+      "env": {
+        "DATABASE_URI": "${AGENT2DB_RO_DSN}"
+      },
+      "enabled": true,
+      "requiresApproval": false
+    },
+    "postgres-write": {
+      "command": "uvx",
+      "args": ["postgres-mcp", "--access-mode=unrestricted"],
+      "env": {
+        "DATABASE_URI": "${AGENT2DB_RW_DSN}"
+      },
+      "enabled": false,
+      "requiresApproval": true
+    },
+    "agent2db": {
+      "command": "uv",
+      "args": ["run", "--project", "services/agent2db-mcp", "agent2db-mcp"],
+      "env": {
+        "DATABASE_URL": "${DATABASE_URL}"
+      },
+      "enabled": false,
+      "requiresApproval": ["kg_delete_fact", "delete_snippet"]
+    }
+  }
+}
